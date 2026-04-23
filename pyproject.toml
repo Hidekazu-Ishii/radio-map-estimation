@@ -1,0 +1,56 @@
+[project]
+name = "lab-template-python"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Koki Yamada", email = "k-yamada@go.tuat.ac.jp" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.2",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes (undefined names, etc.)
+  "W",   # pycodestyle warnings
+  "I",   # isort (import order)
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear (common pitfalls)
+  "SIM", # flake8-simplify
+  "C4",  # flake8-comprehensions
+  "N",   # pep8-naming
+  "RUF", # Ruff-specific rules
+]
+
+ignore = ["E501"]
+unfixable = [
+    "F401",
+    "F841",
+]
+
+# Good for generated/package boilerplate and tests
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]    # allow re-export imports
+"tests/**/*.py" = ["N802", "N803", "N806"]  # often useful in scientific tests (X, Y, etc.)
+# If notebook linting is enabled and too noisy, you can add:
+# "*.ipynb" = ["E402"]

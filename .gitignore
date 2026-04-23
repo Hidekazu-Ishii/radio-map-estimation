@@ -1,0 +1,129 @@
+# ==============================================================================
+# Python / Packaging
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.dll
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheelhouse/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+ENV/
+env/
+.conda/
+conda-env/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.pyright/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# ==============================================================================
+# Jupyter / IPython
+# ==============================================================================
+.ipynb_checkpoints/
+.ipython/
+.profile_default/
+
+# Optional: keep notebooks but ignore Jupyter exports
+*.nbconvert.ipynb
+
+# ==============================================================================
+# Editors / OS
+# ==============================================================================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# ==============================================================================
+# Logs
+# ==============================================================================
+*.log
+logs/
+log/
+
+# ==============================================================================
+# Data / Results (DO NOT COMMIT)
+# ==============================================================================
+# Local datasets
+data/**
+!data/
+!data/**/
+!data/.gitkeep
+!data/**/.gitkeep
+
+# Experiment outputs (tiered)
+outputs/**
+!outputs/
+!outputs/**/
+!outputs/.gitkeep
+!outputs/**/.gitkeep
+
+# Exported models (curated artifacts, still large -> keep out of git)
+models/**
+!models/
+!models/**/
+!models/.gitkeep
+!models/**/.gitkeep
+
+# ==============================================================================
+# ML / Experiment tracking artifacts
+# ==============================================================================
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+tb_logs/
+runs/
+
+# Checkpoints / model files
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.pkl
+*.joblib
+*.onnx
+*.safetensors
+
+# Figures / large generated artifacts (keep under outputs/ typically)
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.tif
+*.svg
+
+# ==============================================================================
+# Project-specific (optional)
+# ==============================================================================
+# If you generate temporary files under scripts/tools or elsewhere:
+tmp/
+temp/
