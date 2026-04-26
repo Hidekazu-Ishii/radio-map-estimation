@@ -1,5 +1,5 @@
 {
-    "name": "GPU Dev Container",
+    "name": "radio-map-estimation-devcontainer",
     "build": {
         "dockerfile": "Dockerfile",
         "context": "."

@@ -37,6 +37,7 @@ conda-env/
 .coverage.*
 htmlcov/
 .cache/
+cache/
 
 # ==============================================================================
 # Jupyter / IPython
