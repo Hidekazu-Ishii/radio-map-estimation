@@ -1,0 +1,52 @@
+# エリア設定: 東京・大手町
+center_lat: 35.68571914391243
+center_lon: 139.7657324774078
+area_size_m: 500.0
+cell_size_m: 2.0
+
+# 建物高さ推定パラメータ
+meters_per_level: 3.0
+default_building_height_m: 30.0
+
+# building タグ（用途）
+building_type_levels:
+  house:       2.0
+  detached:    2.0
+  bungalow:    1.0
+  residential: 3.0
+  apartments:  5.0
+  commercial:  4.0
+  office:      6.0
+  retail:      2.0
+  industrial:  1.5
+  warehouse:   1.5
+  church:      3.0
+  cathedral:   4.0
+  school:      3.0
+  hospital:    5.0
+  hotel:       6.0
+  yes:         3.0  # 用途不明のデフォルト
+
+# 送信機
+tx_height_m: 25.0
+tx_power_dbm: 43.0   # 200 mW
+tx_intensity: 12.0e-6   # [TX/m^2] → 0.25km^2 で期待値3局
+
+# 電波設定
+frequency_hz: 3.5e9   # 5G Sub-6 GHz
+rx_height_m: 1.5   # 歩行者受信高さ
+
+# Ray Tracing
+max_depth: 5
+samples_per_tx: 1000000000   # 100M サンプル
+
+# 材質 (ITU Radio Material)
+building_material: "concrete"
+ground_material: "very_dry_ground"
+
+# 観測ノイズ
+noise_std_db: 3.0
+
+# 試行
+n_trials: 1
+master_seed: 181   # master_seed:= 42 + center_lan
