@@ -27,26 +27,6 @@ building_type_levels:
   hotel:       6.0
   yes:         3.0  # 用途不明のデフォルト
 
-# 送信機
-tx_height_m: 25.0
-tx_power_dbm: 43.0   # 200 mW
-tx_intensity: 12.0e-6   # [TX/m^2] → 0.25km^2 で期待値3局
-
-# 電波設定
-frequency_hz: 3.5e9   # 5G Sub-6 GHz
-rx_height_m: 1.5   # 歩行者受信高さ
-
-# Ray Tracing
-max_depth: 5
-samples_per_tx: 1000000000   # 100M サンプル
-
-# 材質 (ITU Radio Material)
-building_material: "concrete"
-ground_material: "very_dry_ground"
-
-# 観測ノイズ
-noise_std_db: 3.0
-
 # 試行
 n_trials: 1
-master_seed: -80    # master_seed := 42 + center_lon
+master_seed: 164    # master_seed := 42 + |center_lon|

@@ -74,7 +74,7 @@ def build_building_meshes(
                 continue
 
     if not meshes:
-        raise RuntimeError("有効な建物メッシュが1つも生成されませんでした.")
+        raise RuntimeError("No valid building meshes were generated.")
 
     return meshes
 
@@ -294,18 +294,14 @@ def run_radio_map(
         diffraction=True,
     )
 
-    # path_gain
-    path_gain_np: np.ndarray = radio_map.path_gain.numpy()  # (num_tx, H, W)
-    path_gain_2d: np.ndarray = path_gain_np[0]  # TX index 0
+    rss_np = radio_map.rss.numpy()  # (num_tx=1, H, W) [W]
+    rss_w = rss_np[0]
 
-    # レイ未到達セル (path_gain が極めて小さい) を nan に置換
-    # 閾値: -120 dB 以下は物理的に意味がない
-    unreached_threshold = 1e-12  # -120 dB 相当
-    path_gain_masked = np.where(path_gain_2d > unreached_threshold, path_gain_2d, np.nan)
-
-    # path_gain [dB] + tx_power [dBm] = RSS [dBm]
-    path_gain_db: np.ndarray = 10.0 * np.log10(path_gain_masked)
-    rss_dbm: np.ndarray = path_gain_db + tx_power_dbm  # RSS [dBm]
+    # 0.0 セル (sionna rt の仕様でレイ未到達点は0.0になる) を nan に置換してから dBm 変換
+    rss_w_safe = np.where(rss_w > 0.0, rss_w, np.nan)
+    # print(f"rss raw: min={np.nanmin(rss_w_safe):.3e}, max={np.nanmax(rss_w_safe):.3e}")
+    with np.errstate(invalid="ignore"):
+        rss_dbm = 10.0 * np.log10(rss_w_safe) + 30.0  # W → dBm
     return rss_dbm
 
 
@@ -325,14 +321,14 @@ def compute_best_server_map(
     Parameters
     ----------
     rss_dbm_list : list of ndarray, each shape (H, W)
-        TX ごとの RSS マップ [dBm]. nan はレイ未到達セル.
+        TX ごとの RSS マップ [dBm].
 
     Returns
     -------
     rss_best : ndarray of shape (H, W)
         best-server の RSS [dBm].
     """
-    # nan を無視して最大値を取る (nanmax)
+    # 最大値を取る
     stacked: np.ndarray = np.stack(rss_dbm_list, axis=0)  # (T, H, W)
     rss_best: np.ndarray = np.nanmax(stacked, axis=0)  # (H, W)
     return rss_best
@@ -357,7 +353,7 @@ def plot_radio_map(
     Parameters
     ----------
     rss_dbm : ndarray of shape (H, W)
-        RSS マップ [dBm]. nan はレイ未到達セル.
+        RSS マップ [dBm].
     building_mask : ndarray of shape (H, W), dtype bool
         建物セルのマスク.
     area_size_m : float
