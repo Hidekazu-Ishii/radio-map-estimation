@@ -1,15 +1,21 @@
-# 送信機
-tx_height_m: 25.0
-tx_power_dbm: 43.0   # 20 W
-tx_intensity: 8.0e-6   # [TX/m^2] → 0.25km^2 で期待値3局
+# 送信機配置
+tx_power_dbm: 43.0                 # 送信電力 [dBm] (20W, マクロセル相当)
+tx_intensity: 8.0e-6               # TX 密度 [TX/m^2] → 500m×500mで期待値2局
+min_open_neighbors: 4              # 隅セルの最小開放(非建物)近傍数
+min_separation_m: 150.0            # TX 間の最小離間距離 [m]
+tx_height_above_building_m: 3.0    # 建物高さへの上乗せ [m] (屋上オフセット)
+min_building_height_m: 20.0        # TX 設置可能な建物の最低高さ [m]
+max_building_height_m: 40.0        # TX 設置可能な建物の最高高さ [m]
+height_weight_power: 1.0           # 高さの重みの指数 (0=一様, 1=線形, 2=二乗)
+inner_margin_m: 50.0               # エリア端の除外幅 [m] → 内部 400m×400m
 
 # 電波設定
-frequency_hz: 3.5e9   # 5G Sub-6 GHz
-rx_height_m: 1.5   # 歩行者受信高さ
+frequency_hz: 3.5e9                # 搬送波周波数 [Hz] (5G Sub-6 GHz)
+rx_height_m: 1.5                   # 受信機高さ [m] (歩行者想定)
 
 # Ray Tracing
-max_depth: 5
-samples_per_tx: 1000000000   # 100M サンプル
+max_depth: 5                       # 最大反射回数
+samples_per_tx: 1000000000        # TX あたりのレイサンプル数 (100M)
 
 # 材質 (ITU Radio Material)
 building_material: "concrete"
@@ -17,3 +23,7 @@ ground_material: "very_dry_ground"
 
 # 観測ノイズ
 noise_std_db: 3.0
+
+# 試行
+n_trials: 1
+master_seed: 42

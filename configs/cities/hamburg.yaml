@@ -1,0 +1,8 @@
+# エリア設定: Hafencity, Hamburg, Germony
+center_lat: 53.540856060191565
+center_lon: 10.003910792601538
+area_size_m: 500.0
+cell_size_m: 2.0
+
+#center_lat: 53.545092209519076
+#center_lon: 10.000923826309451

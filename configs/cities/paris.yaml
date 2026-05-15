@@ -1,32 +1,8 @@
-# エリア設定: パリ・凱旋門
-center_lat: 48.87374330170094
-center_lon: 2.294997990652928
+# エリア設定: Etoile, Paris, France
+center_lat: 48.87309486553123
+center_lon: 2.2988394372731995
 area_size_m: 500.0
 cell_size_m: 2.0
 
-# 建物高さ推定パラメータ
-meters_per_level: 3.0
-default_building_height_m: 15.0
-
-# building タグ（用途）
-building_type_levels:
-  house:       2.0
-  detached:    2.0
-  bungalow:    1.0
-  residential: 3.0
-  apartments:  5.0
-  commercial:  4.0
-  office:      6.0
-  retail:      2.0
-  industrial:  1.5
-  warehouse:   1.5
-  church:      3.0
-  cathedral:   4.0
-  school:      3.0
-  hospital:    5.0
-  hotel:       6.0
-  yes:         3.0  # 用途不明のデフォルト
-
-# 試行
-n_trials: 10
-master_seed: 40   # master_seed := 42 + |center_lon|
+#center_lat: 48.87395093518344
+#center_lon: 2.2949755637578613

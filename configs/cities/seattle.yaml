@@ -3,30 +3,3 @@ center_lat: 47.61565392073464
 center_lon: -122.33910869191322
 area_size_m: 500.0
 cell_size_m: 2.0
-
-# 建物高さ推定パラメータ
-meters_per_level: 3.0
-default_building_height_m: 6.0
-
-# building タグ（用途）
-building_type_levels:
-  house:       2.0
-  detached:    2.0
-  bungalow:    1.0
-  residential: 3.0
-  apartments:  5.0
-  commercial:  4.0
-  office:      6.0
-  retail:      2.0
-  industrial:  1.5
-  warehouse:   1.5
-  church:      3.0
-  cathedral:   4.0
-  school:      3.0
-  hospital:    5.0
-  hotel:       6.0
-  yes:         3.0  # 用途不明のデフォルト
-
-# 試行
-n_trials: 1
-master_seed: 164    # master_seed := 42 + |center_lon|

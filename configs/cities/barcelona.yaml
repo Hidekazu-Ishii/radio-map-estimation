@@ -1,0 +1,8 @@
+# エリア設定: Eixample, Barcelona, Spain
+center_lat: 41.39163844979611
+center_lon: 2.165300153502456
+area_size_m: 500.0
+cell_size_m: 2.0
+
+#center_lat: 41.39653496356495
+#center_lon: 2.1594780861087988

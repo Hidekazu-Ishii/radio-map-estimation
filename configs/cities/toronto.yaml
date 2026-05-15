@@ -1,0 +1,5 @@
+# エリア設定: Downtown Toronto
+center_lat: 43.652231783427155
+center_lon: -79.38168105129199
+area_size_m: 500.0
+cell_size_m: 2.0

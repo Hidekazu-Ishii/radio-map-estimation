@@ -1,0 +1,13 @@
+# エリア設定: Raffles Place, Marina, Singapore
+center_lat: 1.2849523768931193
+center_lon: 103.8522586206116
+area_size_m: 500.0
+cell_size_m: 2.0
+
+# エリア設定: Marina Bay, Marina, Singapore もかなりいい
+# center_lat: 1.2894638881105684
+# center_lon: 103.85574882908313
+# height tag:        17 buildings
+# building:levels:   3 buildings
+# default height:    3 buildings (mean=9.8 m)
+# default ratio:     13.0%
