@@ -121,6 +121,7 @@ checkpoints/
 *.tiff
 *.tif
 *.svg
+*.html
 
 # ==============================================================================
 # Project-specific (optional)

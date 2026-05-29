@@ -1,9 +1,15 @@
 # scripts/simulate_radiomap.py
 """
-エントリポイント: OSMnx で建物取得 + 補完処理 → Sionna RT でマルチ TX 電波マップ生成.
+エントリポイント: 建物取得 + 補完処理 → Sionna RT でマルチ TX 電波マップ生成.
+
+建物ソース:
+    --source osm      OSMnx 経由 (デフォルト, ネット接続必要)
+    --source citygml  CityGML ファイル経由 (PLATEAU / LoD2-DE)
 
 Usage:
     uv run scripts/simulate_radiomap.py --city berlin
+    uv run scripts/simulate_radiomap.py --city tokyo \\
+        --source citygml --citygml-dir /data/plateau/tokyo/udx/bldg
 """
 
 import argparse
@@ -12,20 +18,15 @@ from typing import Any
 
 import numpy as np
 from numpy.random import Generator, default_rng
+from radio_map_estimation.scene.citygml_buildings import fetch_buildings_citygml
+from radio_map_estimation.scene.datasource.osm_buildings import fetch_buildings_osm
 
-from radio_map_estimation.scene.building_completion import apply_building_completion
-from radio_map_estimation.scene.mesh_builder import (
+from radio_map_estimation.osm.mesh_builder import (
     build_building_meshes,
     build_ground_mesh,
     save_meshes_to_obj,
 )
-from radio_map_estimation.scene.osm_buildings import fetch_buildings_osm
-from radio_map_estimation.scene.radiomap_solver import (
-    radio_map_to_rss_dbm,
-    run_radio_map,
-)
-from radio_map_estimation.scene.scene_writer import write_mitsuba_xml
-from radio_map_estimation.scene.schema import (
+from radio_map_estimation.osm.osm_schema import (
     BuildingData,
     BuildingHeightConfig,
     CityConfig,
@@ -33,8 +34,13 @@ from radio_map_estimation.scene.schema import (
     load_city_config,
     save_building_data,
 )
+from radio_map_estimation.osm.scene_writer import write_mitsuba_xml
 from radio_map_estimation.simulate.observation_noise import (
     add_observation_noise,
+)
+from radio_map_estimation.simulate.radiomap_solver import (
+    radio_map_to_rss_dbm,
+    run_radio_map,
 )
 from radio_map_estimation.simulate.schema import (
     SimulationConfig,
@@ -64,6 +70,29 @@ def parse_args() -> argparse.Namespace:
         type=str,
         required=True,
         help="都市名 (configs/cities/{city}.yaml に対応)",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["osm", "citygml"],
+        default="osm",
+        help="建物データソース (osm: OSMnx, citygml: CityGML ファイル)",
+    )
+    parser.add_argument(
+        "--citygml-dir",
+        type=Path,
+        default=None,
+        help="CityGML ファイルのディレクトリ (--source citygml 時に必須)",
+    )
+    parser.add_argument(
+        "--citygml-source",
+        choices=["plateau", "lod2de"],
+        default="plateau",
+        help="CityGML データ種別 (plateau=東京PLATEAU, lod2de=独LoD2)",
+    )
+    parser.add_argument(
+        "--citygml-glob",
+        default="**/*.gml",
+        help="CityGML ファイルの glob パターン (default: **/*.gml)",
     )
     return parser.parse_args()
 
@@ -119,6 +148,7 @@ def _run_trial(
         max_depth=sim_cfg.max_depth,
         cell_size_m=city_cfg.cell_size_m,
         samples_per_tx=sim_cfg.samples_per_tx,
+        seed=sim_cfg.master_seed + trial_idx,
     )
 
     # numpy 変換
@@ -185,23 +215,33 @@ def main() -> None:
     mesh_dir = scene_dir / "mesh"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- [共通] OSMnx で建物取得 ---
-    print("[1/3] Fetching buildings from OSM...")
-    building_data: BuildingData = fetch_buildings_osm(
-        center_lat=city_cfg.center_lat,
-        center_lon=city_cfg.center_lon,
-        area_size_m=city_cfg.area_size_m,
-        cell_size_m=city_cfg.cell_size_m,
-        meters_per_level=bh_cfg.meters_per_level,
-    )
-    save_figure(show_building_data(building_data), output_dir / "building_map_ori.png")
-
-    # --- [共通] 建物マスク補完 ---
-    building_data = apply_building_completion(
-        data=building_data,
-        closing_size=3,
-    )
-    save_building_data(data=building_data, output_dir=output_dir)
+    # --- [共通] 建物取得 ---
+    if args.source == "citygml":
+        if args.citygml_dir is None:
+            raise ValueError("--source citygml を指定する場合は --citygml-dir が必要です.")
+        citygml_paths = sorted(args.citygml_dir.glob(args.citygml_glob))
+        if not citygml_paths:
+            raise FileNotFoundError(
+                f"CityGML ファイルが見つかりません: {args.citygml_dir / args.citygml_glob}"
+            )
+        print(f"[1/3] Fetching buildings from CityGML ({len(citygml_paths)} files)...")
+        building_data: BuildingData = fetch_buildings_citygml(
+            citygml_paths=citygml_paths,
+            center_lat=city_cfg.center_lat,
+            center_lon=city_cfg.center_lon,
+            area_size_m=city_cfg.area_size_m,
+            cell_size_m=city_cfg.cell_size_m,
+            source=args.citygml_source,
+        )
+    else:
+        print("[1/3] Fetching buildings from OSM...")
+        building_data = fetch_buildings_osm(
+            center_lat=city_cfg.center_lat,
+            center_lon=city_cfg.center_lon,
+            area_size_m=city_cfg.area_size_m,
+            cell_size_m=city_cfg.cell_size_m,
+            meters_per_level=bh_cfg.meters_per_level,
+        )
     save_figure(show_building_data(building_data), output_dir / "building_map.png")
 
     # --- [共通] 3D シーン構築 ---

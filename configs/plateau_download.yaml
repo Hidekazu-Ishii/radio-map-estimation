@@ -1,0 +1,23 @@
+# PLATEAU データ取得設定
+# ダウンロード元: G空間情報センター (geospatial.jp)
+# ライセンス: PLATEAU Site Policy「３．著作権について」に拠る
+# https://www.mlit.go.jp/plateau/site-policy/
+
+# 対象とするエリアはここに追加
+areas:
+  - city_code: "13101"
+    city_name: "chiyoda-ku"
+    year: 2023
+    # G空間情報センターのダウンロードURL（CityGML v4）
+    citygml_url: "https://assets.cms.plateau.reearth.io/assets/f0/8694c9-c697-4c07-96fc-720b6f61b06b/13101_chiyoda-ku_pref_2023_citygml_2_op.zip"
+  - city_code: "13102"
+    city_name: "chuo-ku"
+    year: 2023
+    citygml_url: "https://assets.cms.plateau.reearth.io/assets/0c/b282cf-c242-4dd7-af9b-4ec3d4373018/13102_chuo-ku_pref_2023_citygml_2_op.zip"
+
+# ZIP の保存先: data/raw/<city_code>_<city_name>_<year>.zip
+# GDF の出力先: data/raw/<city_code>_<city_name>_<year>_.parquet
+raw_dir: "data/raw"
+
+# GeoDataFrame の出力フォーマット
+output_format: "geoparquet"   # "geoparquet" or "geojson"

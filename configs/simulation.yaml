@@ -15,7 +15,7 @@ rx_height_m: 1.5                   # 受信機高さ [m] (歩行者想定)
 
 # Ray Tracing
 max_depth: 5                       # 最大反射回数
-samples_per_tx: 1000000000        # TX あたりのレイサンプル数 (100M)
+samples_per_tx: 100000000          # TX あたりのレイサンプル数 (1000M)
 
 # 材質 (ITU Radio Material)
 building_material: "concrete"

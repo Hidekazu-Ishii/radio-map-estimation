@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 
-from ..scene.osm_buildings import BuildingData
+from ..scene.datasource.osm_buildings import BuildingData
 
 # Sionna が型スタブを提供しないため Any で受ける
 # PlanarRadioMap の実体は sionna.rt.PlanarRadioMap

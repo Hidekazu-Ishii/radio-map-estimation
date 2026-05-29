@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from .schema import BuildingData
+from ..osm.osm_schema import BuildingData
 
 # Sionna が型スタブを提供しないため Any で受ける
 PlanarRadioMap = Any
@@ -29,6 +29,7 @@ def run_radio_map(
     max_depth: int,
     cell_size_m: float,
     samples_per_tx: int,
+    seed: int,
 ) -> PlanarRadioMap:
     """
     Sionna RT で RSS マップ [dBm] を計算して返す.
@@ -106,6 +107,7 @@ def run_radio_map(
         orientation=mi.Point3f([0.0, 0.0, 0.0]),
         size=mi.Point2f([spec.area_size_m, spec.area_size_m]),
         diffraction=True,
+        seed=seed,
     )
     return radio_map
 

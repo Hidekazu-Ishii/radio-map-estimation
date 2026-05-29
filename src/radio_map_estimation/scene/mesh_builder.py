@@ -1,159 +1,217 @@
-# src/radio_map_estimation/scene/mesh_builder.py
 """
-BuildingData → 3D メッシュ (trimesh) → PLY ファイル群
+dem / tran / wtr の parquet からローカル座標の trimesh を生成する
 
-建物: OBJ フォーマット (側面を quad で構成し縮退三角形を回避)
-地面: PLY フォーマット (trimesh で生成)
+役割
+----
+1. dem.parquet  → DEM trimesh (build_dem_mesh)
+2. tran.parquet → 道路 trimesh (build_tran_mesh) 、頂点 z を DEM 補間
+3. wtr.parquet  → 水面 trimesh (build_wtr_mesh) 、頂点 z を DEM 補間
+
+設計方針
+--------
+- parquet_loader で GeoDataFrame を取得し、mesh_utils で trimesh に変換する
+- tran / wtr は PLATEAU 仕様上 surfaces.z=0 固定のため、
+  dem_mesh による補間を必須引数とし、z=0 のまま残るケースを排除する
+- surfaces=None の行は警告ログを出してスキップする
 """
 
+from __future__ import annotations
+
+import json
+import logging
 from pathlib import Path
 
 import numpy as np
 import trimesh
-from shapely.geometry import MultiPolygon, Polygon
-from shapely.ops import triangulate as shapely_triangulate
 
-from .schema import BuildingData
+from radio_map_estimation.scene.mesh_utils import interpolate_ground_z, surfaces_to_trimesh
+from radio_map_estimation.scene.parquet_loader import load_filtered
+from radio_map_estimation.scene.schema import AreaSpec
+
+logger = logging.getLogger(__name__)
 
 
-def extrude_polygon_to_obj(
-    poly: Polygon,
-    height: float,
-    simplify_tolerance: float = 1.0,
-) -> str:
+# ---------------------------------------------------------------------------
+# 共通: GeoDataFrame の surfaces 列から trimesh を生成
+# ---------------------------------------------------------------------------
+
+
+def _build_mesh_from_gdf(
+    parquet_path: Path,
+    area_spec: AreaSpec,
+    label: str,
+) -> trimesh.Trimesh | None:
     """
-    2D ポリゴンを押し出した建物メッシュを OBJ 形式の文字列で返す.
+    parquet を読み込み、surfaces 列から trimesh を生成する共通処理
 
-    側面は quad (四角形) で構成する.
-    三角分割を避けることで縮退三角形による法線の不安定化を防ぐ.
-    """
-    if simplify_tolerance > 0.0:
-        simplified = poly.simplify(tolerance=simplify_tolerance, preserve_topology=True)
-        if not isinstance(simplified, Polygon):
-            raise ValueError(f"単純化後にPolygon以外: {type(simplified)}")
-        poly = simplified
-
-    coords = np.array(poly.exterior.coords)
-    n = len(coords) - 1  # 始点=終点を除く
-    coords = coords[:n]
-
-    if n < 3:
-        raise ValueError(f"縮退ポリゴン: 頂点数={n}")
-
-    lines: list[str] = []
-
-    # 底面頂点 (z=0): index 1..n
-    for x, y in coords:
-        lines.append(f"v {x:.6f} {y:.6f} 0.000000")
-    # 天面頂点 (z=height): index n+1..2n
-    for x, y in coords:
-        lines.append(f"v {x:.6f} {y:.6f} {height:.6f}")
-
-    # 側面: quad (四角形) で構成 (OBJ は 1-indexed)
-    for i in range(n):
-        j = (i + 1) % n
-        # 反時計回り → 外向き法線
-        lines.append(f"f {i + 1} {j + 1} {j + n + 1} {i + n + 1}")
-
-    # 天面: Shapely で三角分割 (天面は三角形でも法線が安定)
-    poly2d = Polygon(coords)
-    for tri in shapely_triangulate(poly2d):
-        tri_coords = np.array(tri.exterior.coords)[:3]
-        idxs: list[int] = []
-        for tc in tri_coords:
-            dists = np.linalg.norm(coords - tc, axis=1)
-            idxs.append(int(np.argmin(dists)) + n + 1)  # 天面: 1-indexed
-        if len(set(idxs)) == 3:
-            lines.append(f"f {idxs[0]} {idxs[1]} {idxs[2]}")
-
-    return "\n".join(lines)
-
-
-def build_building_meshes(
-    building_data: BuildingData,
-    min_height_m: float = 3.0,
-    simplify_tolerance: float = 2.0,
-) -> list[str]:
-    """
-    BuildingData から OBJ 文字列リストを生成する.
-
-    to_local_gdf() が bbox 左下を原点とする座標変換を担う.
-    建物ごとに個別 OBJ 文字列を返す (結合しない).
+    surfaces は JSON 文字列 (dem / tran / wtr) または Python オブジェクト (bldg)
+    各行が 1 サーフェス (dem) または複数サーフェス (tran / wtr) に対応する
 
     Parameters
     ----------
-    building_data : BuildingData
-    min_height_m : float
-        この高さ未満の建物はスキップする.
-    simplify_tolerance : float
-        ポリゴン単純化の許容誤差 [m]. 0.0 で単純化なし.
+    parquet_path : 対象 parquet のパス
+    area_spec    : AreaSpec (ox, oy として bbox_xmin/ymin を使用)
+    label        : ログ出力用ラベル ("dem" / "tran" / "wtr")
 
     Returns
     -------
-    list[str]
-        建物ごとの OBJ 文字列リスト.
+    trimesh.Trimesh | None
     """
-    gdf_local = building_data.to_local_gdf()
+    gdf = load_filtered(parquet_path, area_spec)
+    if gdf.empty:
+        logger.warning("%s: no records in bbox, mesh not generated.", label)
+        return None
 
-    obj_strings: list[str] = []
-    for _, row in gdf_local.iterrows():
-        geom = row.geometry
-        height = float(row["height_m"])
-        if height < min_height_m:
+    ox, oy = area_spec.bbox_xmin, area_spec.bbox_ymin
+    meshes: list[trimesh.Trimesh] = []
+
+    for _, row in gdf.iterrows():
+        raw = row.get("surfaces")
+        if raw is None:
+            logger.warning("%s: surfaces=None, skipping row.", label)
             continue
-        polys: list[Polygon] = list(geom.geoms) if isinstance(geom, MultiPolygon) else [geom]
-        for poly in polys:
-            if poly.geom_type != "Polygon" or poly.is_empty:
-                continue
-            try:
-                obj_strings.append(extrude_polygon_to_obj(poly, height, simplify_tolerance))
-            except Exception as e:
-                print(f"[warn] skipped polygon: {e}")
-                continue
 
-    if not obj_strings:
-        raise RuntimeError("有効な建物メッシュが1つも生成されませんでした.")
+        # JSON 文字列の場合はデシリアライズ
+        surfaces = json.loads(raw) if isinstance(raw, str) else raw
 
-    print(f"[mesh] {len(obj_strings)} buildings generated.")
-    return obj_strings
+        # surfaces の構造を判定して surfaces_to_trimesh の入力形式に統一する
+        # dem  : [[lon, lat, z], ...]          1行 = 1サーフェス → [[...]] でラップ
+        # tran / wtr: [[[lon, lat, z], ...], ...] 1行 = 複数サーフェス → そのまま渡す
+        if surfaces and isinstance(surfaces[0][0], (int, float)):
+            surfaces = [surfaces]
 
+        mesh = surfaces_to_trimesh(surfaces, ox, oy)
+        if mesh is not None:
+            meshes.append(mesh)
 
-def build_ground_mesh(building_data: BuildingData) -> trimesh.Trimesh:
-    """BuildingData から地面メッシュ (z=0 平面) を生成する."""
-    s = building_data.area_spec.area_size_m
-    vertices: np.ndarray = np.array(
-        [[0.0, 0.0, 0.0], [s, 0.0, 0.0], [s, s, 0.0], [0.0, s, 0.0]],
-        dtype=np.float64,
+    if not meshes:
+        logger.warning("%s: all rows failed to generate mesh.", label)
+        return None
+
+    result = trimesh.util.concatenate(meshes)
+    logger.info(
+        "%s mesh: %d vertices, %d faces, z=[%.1f, %.1f] m",
+        label,
+        len(result.vertices),
+        len(result.faces),
+        result.bounds[0, 2],
+        result.bounds[1, 2],
     )
-    faces: np.ndarray = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
-    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    return result
 
 
-def save_meshes_to_obj(
-    building_obj_strings: list[str],
-    ground_mesh: trimesh.Trimesh,
-    mesh_dir: Path,
-) -> tuple[list[Path], Path]:
+# ---------------------------------------------------------------------------
+# DEM
+# ---------------------------------------------------------------------------
+
+
+def build_dem_mesh(
+    dem_parquet: Path,
+    area_spec: AreaSpec,
+) -> trimesh.Trimesh | None:
     """
-    建物 OBJ・地面 PLY ファイルを保存する.
+    dem.parquet からローカル座標の DEM trimesh を生成する
 
-    建物は building_00000.obj, building_00001.obj, ... として個別保存する.
-    地面は ground.ply として保存する.
+    dem の surfaces は JSON 文字列 [[lon, lat, z], ...]
+    各行が TIN の 1 三角形 (通常 4 点、閉じたリング) に対応する
+
+    Parameters
+    ----------
+    dem_parquet : dem.parquet のパス
+    area_spec   : AreaSpec
 
     Returns
     -------
-    (building_objs, ground_ply) : (list[Path], Path)
+    trimesh.Trimesh | None
     """
-    mesh_dir.mkdir(parents=True, exist_ok=True)
+    return _build_mesh_from_gdf(dem_parquet, area_spec, label="dem")
 
-    building_objs: list[Path] = []
-    for i, obj_str in enumerate(building_obj_strings):
-        obj_path = mesh_dir / f"building_{i:05d}.obj"
-        obj_path.write_text(obj_str, encoding="utf-8")
-        building_objs.append(obj_path)
 
-    ground_ply = mesh_dir / "ground.ply"
-    ground_mesh.export(str(ground_ply))
+# ---------------------------------------------------------------------------
+# 道路
+# ---------------------------------------------------------------------------
 
-    print(f"[mesh] {len(building_objs)} buildings (OBJ) + ground (PLY) → {mesh_dir}")
-    return building_objs, ground_ply
+
+def build_tran_mesh(
+    tran_parquet: Path,
+    area_spec: AreaSpec,
+    dem_mesh: trimesh.Trimesh,
+) -> trimesh.Trimesh | None:
+    """
+    tran.parquet からローカル座標の道路 trimesh を生成する
+
+    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする
+    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する
+
+    Parameters
+    ----------
+    tran_parquet : tran.parquet のパス
+    area_spec    : AreaSpec
+    dem_mesh     : DEM trimesh (必須、z 補間に使用)
+
+    Returns
+    -------
+    trimesh.Trimesh | None
+    """
+    result = _build_mesh_from_gdf(tran_parquet, area_spec, label="tran")
+    if result is None:
+        return None
+
+    for i, (x, y, _) in enumerate(result.vertices):
+        result.vertices[i, 2] = interpolate_ground_z(x, y, dem_mesh)
+
+    assert np.all(np.isfinite(result.vertices[:, 2])), (
+        "build_tran_mesh: non-finite z detected after DEM interpolation"
+    )
+
+    logger.info(
+        "tran mesh: z adjusted to DEM elevation, z=[%.1f, %.1f] m",
+        result.vertices[:, 2].min(),
+        result.vertices[:, 2].max(),
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 水面
+# ---------------------------------------------------------------------------
+
+
+def build_wtr_mesh(
+    wtr_parquet: Path,
+    area_spec: AreaSpec,
+    dem_mesh: trimesh.Trimesh,
+) -> trimesh.Trimesh | None:
+    """
+    wtr.parquet からローカル座標の水面 trimesh を生成する
+
+    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする
+    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する
+
+    Parameters
+    ----------
+    wtr_parquet : wtr.parquet のパス
+    area_spec   : AreaSpec
+    dem_mesh    : DEM trimesh (必須、z 補間に使用)
+
+    Returns
+    -------
+    trimesh.Trimesh | None
+    """
+    result = _build_mesh_from_gdf(wtr_parquet, area_spec, label="wtr")
+    if result is None:
+        return None
+
+    for i, (x, y, _) in enumerate(result.vertices):
+        result.vertices[i, 2] = interpolate_ground_z(x, y, dem_mesh)
+
+    assert np.all(np.isfinite(result.vertices[:, 2])), (
+        "build_wtr_mesh: non-finite z detected after DEM interpolation"
+    )
+
+    logger.info(
+        "wtr mesh: z adjusted to DEM elevation, z=[%.1f, %.1f] m",
+        result.vertices[:, 2].min(),
+        result.vertices[:, 2].max(),
+    )
+    return result

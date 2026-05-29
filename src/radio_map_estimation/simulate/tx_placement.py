@@ -7,7 +7,7 @@ from scipy.ndimage import generic_filter
 
 def compute_open_building_mask(
     building_mask: np.ndarray,
-    min_open_neighbors,
+    min_open_neighbors: int,
 ) -> np.ndarray:
     """
     開放度が高い建物セルマスクを返す.
@@ -18,7 +18,6 @@ def compute_open_building_mask(
     ----------
     building_mask : ndarray of shape (H, W), dtype bool
     min_open_neighbors : int
-        TX 配置候補として「周囲が開けている建物セル」を選ぶための指標.
 
     Returns
     -------
@@ -26,7 +25,6 @@ def compute_open_building_mask(
     """
 
     def count_open_neighbors(values: np.ndarray) -> float:
-        """8近傍の非建物セル数を返す (中心セル自身を除く)."""
         center_idx = len(values) // 2
         neighbors = np.concatenate([values[:center_idx], values[center_idx + 1 :]])
         return float(np.sum(neighbors == 0))
@@ -35,151 +33,255 @@ def compute_open_building_mask(
         building_mask.astype(float),
         function=count_open_neighbors,
         size=3,
-        mode="nearest",  # グリッド外は最近傍セルで埋める (inner_mask で端は除外済みのため実質無関係)
+        mode="nearest",
     ).astype(int)
 
-    # 建物セル かつ 開放近傍数が閾値以上
-    corner_mask: np.ndarray = building_mask & (open_neighbor_count >= min_open_neighbors)
-    return corner_mask
+    return building_mask & (open_neighbor_count >= min_open_neighbors)
 
 
-def place_tx_ppp(
-    rng: Generator,
-    area_size_m: float,
-    intensity: float,
-    building_heights: np.ndarray,
-    cell_size_m: float,
+def _build_candidate_mask(
     building_mask: np.ndarray,
+    building_heights: np.ndarray,
     min_open_neighbors: int,
-    min_separation_m: float,
-    tx_height_above_building_m: float,
     min_building_height_m: float,
     max_building_height_m: float,
-    height_weight_power: float,
-    inner_margin_m: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    現実的な制約を考慮した PPP で TX を配置する.
+    TX 配置候補セルのマスクと (rows, cols) を返す.
 
-    制約:
-        1. 建物屋上への設置:
-            building_mask=True のセルのみ候補
-        2. 道路近接:
-            建物隅セルのみ (隣接8セルに min_open_neighbors 以上の非建物セルが存在)
-        3. 高さ制限:
-            min_building_height_m 以上 max_building_height_m 以下の建物のみが対象
-        4. 高い建物ほど選ばれやすい:
-            height_weight_power による重み付きサンプリング
-        5. 最小離間距離:
-            min_separation_m
-        6. エリア内部への配置:
-            inner_margin_m 分だけエリア端を除外
-
-    基地局を配置可能なセルがなくなった場合, その時点での配置とする.
-
-    Parameters
-    ----------
-    rng : Generator
-        呼び出し元から受け渡す乱数生成器.
-    area_size_m : float
-        エリア一辺 [m].
-    intensity : float
-        TX 密度 [TX/m^2]. 期待配置数 = intensity x area_size_m^2.
-    building_heights : ndarray of shape (H, W)
-        建物高さグリッド [m].
-    cell_size_m : float
-    proximity_mask : ndarray of shape (H, W), dtype bool
-        compute_road_proximity_mask() の出力.
-        True のセルのみ TX 候補.
-    min_separation_m : float
-        TX 間の最小離間距離 [m].
-    tx_height_above_building_m : float
-        建物高さへの上乗せ (基地局自体の高さ) [m] (屋上からのオフセット).
-    min_building_height_m : float
-        TX を設置する建物の最低高さ [m]. これ未満の建物は候補から除外.
-    max_building_height_m : float
-        TX を設置する建物の最高高さ [m]. これ超の建物は候補から除外.
-    height_weight_power : float
-        高さの重みの指数.
-    inner_margin_m : float
-        エリア端から除外する幅 [m].
+    条件:
+        1. 建物セルかつ開放近傍数 >= min_open_neighbors
+        2. min_building_height_m <= 建物高さ <= max_building_height_m
 
     Returns
     -------
-    tx_positions : np.ndarray of shape (T, 3) [m]
-        TX の (x, y, z) 座標. ローカル座標系 (bbox左下を原点).
-        z = 建物高さ + tx_height_above_building_m.
+    candidate_mask : ndarray of shape (H, W), dtype bool
+    rows, cols     : ndarray of shape (N,)
     """
-    grid_size = building_mask.shape[0]
-
-    # --- 候補セルの生成 ---
-
-    # 1. 建物隅セル (道路近接の代理指標)
     corner_mask = compute_open_building_mask(building_mask, min_open_neighbors)
-
-    # 2. 高さ制限フィルタ (20〜40m の建物のみ)
-    height_filter: np.ndarray = (building_heights >= min_building_height_m) & (
-        building_heights <= max_building_height_m
-    )
-
-    # 3. エリア内部フィルタ (inner_margin_m 分だけ端を除外)
-    margin_cells = int(inner_margin_m / cell_size_m)
-    inner_mask = np.zeros((grid_size, grid_size), dtype=bool)
-    inner_mask[margin_cells:-margin_cells, margin_cells:-margin_cells] = True
-
-    # 4. 全制約の AND
-    candidate_mask: np.ndarray = corner_mask & height_filter & inner_mask
-
+    height_filter = (building_heights >= min_building_height_m) & (building_heights <= max_building_height_m)
+    candidate_mask = corner_mask & height_filter
     rows, cols = np.where(candidate_mask)
-    if len(rows) == 0:
-        raise RuntimeError(
-            "候補セルが0件です. "
-            "min_building_height_m / max_building_height_m / inner_margin_m を確認してください."
-        )
+    return candidate_mask, rows, cols
 
-    print(
-        f"[tx] {len(rows)} candidate cells "
-        f"(height {min_building_height_m:.0f}~{max_building_height_m:.0f}m, "
-        f"inner {area_size_m - 2 * inner_margin_m:.0f}m x {area_size_m - 2 * inner_margin_m:.0f}m)"
-    )
 
-    # 高さ重み (線形)
-    heights_at_candidates: np.ndarray = building_heights[rows, cols]
-    weights: np.ndarray = heights_at_candidates**height_weight_power
-    weights /= weights.sum()
+def _sample_with_min_separation(
+    rng: Generator,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    building_heights: np.ndarray,
+    cell_size_m: float,
+    n_tx: int,
+    min_separation_m: float,
+    height_above_building_m: float,
+    forbidden_positions: list[tuple[float, float]] | None = None,
+    forbidden_dist_m: float = 0.0,
+) -> np.ndarray:
+    """
+    候補セルから n_tx 局を最小離間距離制約つきでサンプリングする.
 
-    expected_n = intensity * area_size_m**2
-    n_tx = max(int(rng.poisson(expected_n)), 1)
+    Parameters
+    ----------
+    rows, cols             : 候補セルのインデックス
+    forbidden_positions    : 他タイプ TX の (x, y) リスト (UMi から UMa を除外するため)
+    forbidden_dist_m       : forbidden_positions との最小距離 [m]
 
+    Returns
+    -------
+    tx_positions : ndarray of shape (n_placed, 3)  [m]
+        z = 建物高さ + height_above_building_m
+    """
+    # 一様サンプリング (高さ重みなし)
+    perm = rng.permutation(len(rows))
     placed: list[tuple[float, float, float]] = []
-    max_attempts = n_tx * 500
 
-    attempts = 0
-    while len(placed) < n_tx and attempts < max_attempts:
-        idx = int(rng.choice(len(rows), p=weights))
+    for idx in perm:
+        if len(placed) >= n_tx:
+            break
+
         r, c = rows[idx], cols[idx]
-
-        x = (c + rng.uniform(0.0, 1.0)) * cell_size_m
+        x = (c + rng.uniform(0.0, 1.0)) * cell_size_m  # セル内ランダム
         y = (r + rng.uniform(0.0, 1.0)) * cell_size_m
 
-        too_close = any(
+        # 配置済み TX との最小離間距離チェック
+        too_close_placed = any(
             float(np.linalg.norm(np.array([x, y]) - np.array([px, py]))) < min_separation_m
             for px, py, _ in placed
         )
-        if too_close:
-            attempts += 1
+        if too_close_placed:
             continue
 
-        # TX 高さ = 建物高さ + オフセット
-        z = float(building_heights[r, c]) + tx_height_above_building_m
-        placed.append((x, y, z))
-        attempts += 1
+        # forbidden_positions (UMa) との距離チェック
+        if forbidden_positions and forbidden_dist_m > 0.0:
+            too_close_forbidden = any(
+                float(np.linalg.norm(np.array([x, y]) - np.array([fx, fy]))) < forbidden_dist_m
+                for fx, fy in forbidden_positions
+            )
+            if too_close_forbidden:
+                continue
 
-    if not placed:
+        z = float(building_heights[r, c]) + height_above_building_m
+        placed.append((x, y, z))  # type: ignore
+
+    if len(placed) < n_tx:
         raise RuntimeError(
-            f"TX を1局も配置できませんでした (requested={n_tx}). "
-            "min_separation_m を小さくするか intensity を下げてください."
+            f"要求 {n_tx} 局に対して {len(placed)} 局しか配置できませんでした. "
+            "min_separation_m を小さくするか，建物高さ範囲を広げてください."
         )
 
-    print(f"[tx] {len(placed)} TX placed")
-    return np.array(placed, dtype=float)  # (T, 3)
+    return np.array(placed, dtype=float)
+
+
+def place_uma_tx(
+    rng: Generator,
+    building_heights: np.ndarray,
+    building_mask: np.ndarray,
+    cell_size_m: float,
+    n_tx: int,
+    min_open_neighbors: int,
+    min_building_height_m: float,
+    max_building_height_m: float,
+    height_above_building_m: float,
+    min_separation_m: float,
+) -> np.ndarray:
+    """
+    UMa (Urban Macro) TX を配置する.
+
+    TR 38.901 UMa 条件:
+        hBS = 建物高さ + 2.0 m ≈ 25 m (±5 m)
+        → min_building_height_m=18, max_building_height_m=23, height_above_building_m=2.0
+
+    配置条件:
+        1. 建物屋上 (building_mask=True)
+        2. 開放近傍数 >= min_open_neighbors (道路近接の代理指標)
+        3. min_building_height_m <= 建物高さ <= max_building_height_m
+        4. TX 間の最小離間距離 >= min_separation_m
+
+    Parameters
+    ----------
+    rng                      : 呼び出し元から受け渡す乱数生成器
+    building_heights         : ndarray of shape (H, W) [m]
+    building_mask            : ndarray of shape (H, W), dtype bool
+    cell_size_m              : セルサイズ [m]
+    n_tx                     : 配置する TX 数 (決定論的)
+    min_open_neighbors       : 開放近傍の最小数
+    min_building_height_m    : 候補建物の最低高さ [m]
+    max_building_height_m    : 候補建物の最高高さ [m]
+    height_above_building_m  : 屋上からのオフセット [m]
+    min_separation_m         : TX 間の最小離間距離 [m]
+
+    Returns
+    -------
+    tx_positions : ndarray of shape (n_tx, 3) [m]  (x, y, z)
+    """
+    _, rows, cols = _build_candidate_mask(
+        building_mask,
+        building_heights,
+        min_open_neighbors,
+        min_building_height_m,
+        max_building_height_m,
+    )
+
+    if len(rows) == 0:
+        raise RuntimeError(
+            f"UMa 候補セルが 0 件です. "
+            f"建物高さ範囲 [{min_building_height_m}, {max_building_height_m}] m を確認してください."
+        )
+
+    print(f"[UMa] {len(rows)} candidate cells → placing {n_tx} TX")
+
+    tx_positions = _sample_with_min_separation(
+        rng=rng,
+        rows=rows,
+        cols=cols,
+        building_heights=building_heights,
+        cell_size_m=cell_size_m,
+        n_tx=n_tx,
+        min_separation_m=min_separation_m,
+        height_above_building_m=height_above_building_m,
+    )
+
+    print(f"[UMa] {len(tx_positions)} TX placed")
+    return tx_positions
+
+
+def place_umi_tx(
+    rng: Generator,
+    building_heights: np.ndarray,
+    building_mask: np.ndarray,
+    cell_size_m: float,
+    n_tx: int,
+    min_open_neighbors: int,
+    min_building_height_m: float,
+    max_building_height_m: float,
+    height_above_building_m: float,
+    min_separation_m: float,
+    uma_positions: np.ndarray,
+    min_dist_from_uma_m: float,
+) -> np.ndarray:
+    """
+    UMi (Urban Micro) TX を配置する.
+
+    TR 38.901 UMi 条件:
+        hBS = 建物高さ + 0.0 m ≈ 10 m (±2 m)  (建物外壁取り付け想定)
+        → min_building_height_m=8, max_building_height_m=12, height_above_building_m=0.0
+
+    配置条件:
+        1. 建物セル (building_mask=True)
+        2. 開放近傍数 >= min_open_neighbors
+        3. min_building_height_m <= 建物高さ <= max_building_height_m
+        4. TX 間の最小離間距離 >= min_separation_m
+        5. UMa TX から min_dist_from_uma_m 以上離れていること
+
+    Parameters
+    ----------
+    rng                   : 呼び出し元から受け渡す乱数生成器
+    building_heights      : ndarray of shape (H, W) [m]
+    building_mask         : ndarray of shape (H, W), dtype bool
+    cell_size_m           : セルサイズ [m]
+    n_tx                  : 配置する TX 数 (決定論的)
+    min_open_neighbors    : 開放近傍の最小数
+    min_building_height_m : 候補建物の最低高さ [m]
+    max_building_height_m : 候補建物の最高高さ [m]
+    height_above_building_m : 建物高さへの上乗せ [m]
+    min_separation_m      : UMi TX 間の最小離間距離 [m]
+    uma_positions         : place_uma_tx の出力 ndarray of shape (T, 3)
+    min_dist_from_uma_m   : UMa TX との最小離間距離 [m]
+
+    Returns
+    -------
+    tx_positions : ndarray of shape (n_tx, 3) [m]  (x, y, z)
+    """
+    _, rows, cols = _build_candidate_mask(
+        building_mask,
+        building_heights,
+        min_open_neighbors,
+        min_building_height_m,
+        max_building_height_m,
+    )
+
+    if len(rows) == 0:
+        raise RuntimeError(
+            f"UMi 候補セルが 0 件です. "
+            f"建物高さ範囲 [{min_building_height_m}, {max_building_height_m}] m を確認してください."
+        )
+
+    print(f"[UMi] {len(rows)} candidate cells → placing {n_tx} TX")
+
+    uma_xy: list[tuple[float, float]] = [(float(p[0]), float(p[1])) for p in uma_positions]
+
+    tx_positions = _sample_with_min_separation(
+        rng=rng,
+        rows=rows,
+        cols=cols,
+        building_heights=building_heights,
+        cell_size_m=cell_size_m,
+        n_tx=n_tx,
+        min_separation_m=min_separation_m,
+        height_above_building_m=height_above_building_m,
+        forbidden_positions=uma_xy,
+        forbidden_dist_m=min_dist_from_uma_m,
+    )
+
+    print(f"[UMi] {len(tx_positions)} TX placed")
+    return tx_positions

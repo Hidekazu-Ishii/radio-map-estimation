@@ -18,7 +18,7 @@ import pandas as pd
 from shapely.geometry import Point
 from shapely.geometry import box as shapely_box
 
-from .schema import AreaSpec, BuildingData
+from .osm_schema import AreaSpec, BuildingData
 
 
 def fetch_buildings_osm(

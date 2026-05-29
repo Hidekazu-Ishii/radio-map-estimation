@@ -10,7 +10,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.colors import Colormap
 
-from ..scene.osm_buildings import BuildingData
+from ..scene.datasource.osm_buildings import BuildingData
 
 
 def _make_radio_map_cmap() -> Colormap:
