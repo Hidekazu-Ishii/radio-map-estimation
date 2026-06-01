@@ -9,11 +9,11 @@ building_completion モジュールのテスト.
 import geopandas as gpd
 import numpy as np
 import pytest
-
 from src.radio_map_estimation.scene.building_completion import (
     _fill_enclosed_cells,
     apply_building_completion,
 )
+
 from src.radio_map_estimation.scene.schema import AreaSpec, BuildingData
 
 # ---------------------------------------------------------------------------

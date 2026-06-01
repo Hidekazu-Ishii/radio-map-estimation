@@ -90,6 +90,73 @@ def _apply_dem_offset(
     return mesh
 
 
+def build_bldg_footprint_mesh(
+    bldg_parquet: Path,
+    area_spec: AreaSpec,
+) -> trimesh.Trimesh | None:
+    """
+    bldg.parquet の geometry (LOD1 底面フットプリント) から
+    ローカル座標の 2D メッシュ (z=0 固定) を生成する
+
+    建物マスク生成 (bldg_mask.py) での交差判定に使用する
+    surfaces ではなく geometry (EPSG:6677 の Polygon) を使うため、
+    LOD1/LOD2 問わず確実なフットプリントが得られる
+
+    Parameters
+    ----------
+    bldg_parquet : bldg.parquet のパス
+    area_spec    : AreaSpec
+
+    Returns
+    -------
+    trimesh.Trimesh | None
+        z=0 の平面メッシュ (全建物フットプリントの結合)
+    """
+    from shapely.affinity import translate as shapely_translate
+    from trimesh.creation import triangulate_polygon
+
+    gdf = load_filtered(bldg_parquet, area_spec)
+    if gdf.empty:
+        logger.warning("bldg_footprint: no records in bbox.")
+        return None
+
+    ox, oy = area_spec.origin_proj_x, area_spec.origin_proj_y
+    meshes: list[trimesh.Trimesh] = []
+
+    for _, row in gdf.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+
+        # 投影座標 → ローカル座標 (z=0 固定)
+        geom_local = shapely_translate(geom, xoff=-ox, yoff=-oy)
+        if not geom_local.is_valid:
+            geom_local = geom_local.buffer(0)
+        if geom_local.is_empty:
+            continue
+
+        try:
+            verts_2d, faces = triangulate_polygon(geom_local)
+            verts_3d = np.zeros((len(verts_2d), 3))
+            verts_3d[:, :2] = verts_2d
+            meshes.append(trimesh.Trimesh(vertices=verts_3d, faces=faces, process=False))
+        except Exception as e:
+            logger.debug("bldg_footprint: triangulation failed: %s", e)
+            continue
+
+    if not meshes:
+        logger.warning("bldg_footprint: all rows failed.")
+        return None
+
+    result = trimesh.util.concatenate(meshes)
+    logger.info(
+        "bldg_footprint mesh: %d buildings, %d faces",
+        len(meshes),
+        len(result.faces),
+    )
+    return result
+
+
 def build_bldg_mesh(
     bldg_parquet: Path,
     area_spec: AreaSpec,
@@ -118,7 +185,7 @@ def build_bldg_mesh(
         logger.warning("bldg: no records in bbox, mesh not generated.")
         return None
 
-    ox, oy = area_spec.bbox_xmin, area_spec.bbox_ymin
+    ox, oy = area_spec.origin_proj_x, area_spec.origin_proj_y
     meshes: list[trimesh.Trimesh] = []
     n_skipped = 0
 

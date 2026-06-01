@@ -60,7 +60,6 @@ def _itu_type(sionna_material: str) -> str:
 def save_mitsuba_xml(
     ply_paths: dict[str, Path],
     xml_path: Path,
-    scene_name: str,
 ) -> None:
     """
     材質別 PLY を参照する Mitsuba3 / Sionna RT 用シーン XML を生成する
@@ -70,7 +69,6 @@ def save_mitsuba_xml(
     ply_paths  : dict[sionna_material, Path]
                  キーは "itu_bldg" / "itu_tran" / "itu_dem" / "itu_wtr" のいずれか
     xml_path   : 出力する XML のパス
-    scene_name : シーン名 (XML の shape id 属性に使用)
     """
     xml_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -89,8 +87,9 @@ def save_mitsuba_xml(
         except ValueError:
             ply_rel = ply_path.resolve().relative_to(xml_path.parent.resolve())
 
+        shape_id = material.removeprefix("itu_")  # "itu_dem" → "dem"
         shape_nodes += (
-            f'    <shape type="ply" id="{scene_name}_{material}">\n'
+            f'    <shape type="ply" id="{shape_id}">\n'
             f'        <string name="filename" value="{ply_rel}"/>\n'
             f'        <ref id="{material}"/>\n'
             f"    </shape>\n"
@@ -105,6 +104,8 @@ def save_mitsuba_xml(
         "  Materials: ITU-R P.2040-3\n"
         "-->\n"
         '<scene version="3.0.0">\n'
+        "\n"
+        '    <integrator type="path"/>\n'
         "\n"
         "    <!-- ===== Radio materials (ITU-R P.2040-3) ===== -->\n"
         f"{bsdf_nodes}"

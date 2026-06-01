@@ -1,0 +1,24 @@
+# Sionna RT シミュレーション設定（全エリア共通）
+
+# 送信機設定
+# TX 位置は bldg.ply から自動設定（UMa 想定）
+# 候補エリア: [area_size_m/10, area_size_m*9/10] x [area_size_m/10, area_size_m*9/10]
+num_tx: 4
+min_separation_m: 500.0  # TX 間の最小離間距離 [m]（3GPP TR 38.901 UMa ISD 参考）
+tx_power_dbm: 46.0       # 送信電力 [dBm]（46 dBm = 40W、マクロセル相当）
+tx_pattern: "tr38901"        # "iso" or "tr38901"
+tx_tilt_deg: 8.0         # tr38901 時のダウンチルト角 [deg]（iso 時は無視）
+
+# 受信機設定
+rx_height_m: 1.5         # 受信機高さ [m]（PlanarRadioMap の z 座標）
+
+# 搬送波周波数 [Hz]
+frequency_hz: 3.5e9      # 3.5 GHz（Sub-6 GHz 5G）
+
+# レイトレーシング設定
+cell_size_m: 5.0         # セルサイズ [m]
+num_samples: 10000000    # サンプル数（精度と計算時間のトレードオフ）
+max_depth: 5             # 最大反射回数
+
+# 観測ノイズ設定
+noise_std_db: 3.0        # 観測ノイズの標準偏差 [dB]

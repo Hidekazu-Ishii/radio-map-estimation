@@ -7,7 +7,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
-
 from src.radio_map_estimation.scene.scene_writer import write_mitsuba_xml
 
 # ---------------------------------------------------------------------------

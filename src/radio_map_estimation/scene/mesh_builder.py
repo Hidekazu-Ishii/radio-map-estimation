@@ -1,5 +1,5 @@
 """
-dem / tran / wtr の parquet からローカル座標の trimesh を生成する
+dem / tran / wtr の parquet からローカル座標の trimesh を生成する。
 
 役割
 ----
@@ -42,10 +42,10 @@ def _build_mesh_from_gdf(
     label: str,
 ) -> trimesh.Trimesh | None:
     """
-    parquet を読み込み、surfaces 列から trimesh を生成する共通処理
+    parquet を読み込み、surfaces 列から trimesh を生成する共通処理。
 
-    surfaces は JSON 文字列 (dem / tran / wtr) または Python オブジェクト (bldg)
-    各行が 1 サーフェス (dem) または複数サーフェス (tran / wtr) に対応する
+    surfaces は JSON 文字列 (dem / tran / wtr) または Python オブジェクト (bldg) 。
+    各行が 1 サーフェス (dem) または複数サーフェス (tran / wtr) に対応する。
 
     Parameters
     ----------
@@ -62,7 +62,9 @@ def _build_mesh_from_gdf(
         logger.warning("%s: no records in bbox, mesh not generated.", label)
         return None
 
-    ox, oy = area_spec.bbox_xmin, area_spec.bbox_ymin
+    ox, oy = area_spec.origin_proj_x, area_spec.origin_proj_y
+    # ox, oy は origin の投影座標 (ローカル座標の原点)
+    # bbox_xmin/ymin ではないことに注意
     meshes: list[trimesh.Trimesh] = []
 
     for _, row in gdf.iterrows():
@@ -110,10 +112,10 @@ def build_dem_mesh(
     area_spec: AreaSpec,
 ) -> trimesh.Trimesh | None:
     """
-    dem.parquet からローカル座標の DEM trimesh を生成する
+    dem.parquet からローカル座標の DEM trimesh を生成する。
 
-    dem の surfaces は JSON 文字列 [[lon, lat, z], ...]
-    各行が TIN の 1 三角形 (通常 4 点、閉じたリング) に対応する
+    dem の surfaces は JSON 文字列 [[lon, lat, z], ...]。
+    各行が TIN の 1 三角形 (通常 4 点、閉じたリング) に対応する。
 
     Parameters
     ----------
@@ -138,10 +140,10 @@ def build_tran_mesh(
     dem_mesh: trimesh.Trimesh,
 ) -> trimesh.Trimesh | None:
     """
-    tran.parquet からローカル座標の道路 trimesh を生成する
+    tran.parquet からローカル座標の道路 trimesh を生成する。
 
-    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする
-    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する
+    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする。
+    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する。
 
     Parameters
     ----------
@@ -183,10 +185,10 @@ def build_wtr_mesh(
     dem_mesh: trimesh.Trimesh,
 ) -> trimesh.Trimesh | None:
     """
-    wtr.parquet からローカル座標の水面 trimesh を生成する
+    wtr.parquet からローカル座標の水面 trimesh を生成する。
 
-    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする
-    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する
+    PLATEAU 仕様上 surfaces.z=0 固定のため、dem_mesh による DEM 補間を必須とする。
+    全頂点の z を interpolate_ground_z で上書きすることで z=0 残留を排除する。
 
     Parameters
     ----------

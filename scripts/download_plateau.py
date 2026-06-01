@@ -55,7 +55,6 @@ class AreaConfig:
 @dataclass(frozen=True)
 class PlateauDownloadConfig:
     areas: tuple[AreaConfig, ...]
-    raw_dir: Path
     output_format: str
 
     @classmethod
@@ -73,7 +72,6 @@ class PlateauDownloadConfig:
                 )
                 for a in cfg.areas
             ),
-            raw_dir=Path(cfg.raw_dir),
             output_format=fmt,
         )
 
@@ -89,13 +87,14 @@ def _suffix(fmt: str) -> str:
 
 def main(config_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
+    raw_dir = root / "data" / "raw"
     cfg = PlateauDownloadConfig.from_omega(OmegaConf.load(config_path))  # type: ignore
     suffix = _suffix(cfg.output_format)
 
     for area in cfg.areas:
         logger.info("=== Processing: %s ===", area.city_name)
 
-        area_dir = root / cfg.raw_dir / f"{area.city_code}_{area.city_name}_{area.year}"
+        area_dir = raw_dir / f"{area.city_code}_{area.city_name}_{area.year}"
         zip_path = area_dir / "citygml.zip"
 
         download_zip(area.citygml_url, zip_path)

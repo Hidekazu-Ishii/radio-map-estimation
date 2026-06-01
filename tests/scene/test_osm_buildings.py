@@ -10,7 +10,6 @@ osm_buildings モジュールのテスト.
 import geopandas as gpd
 import pytest
 from shapely.geometry import box as shapely_box
-
 from src.radio_map_estimation.scene.osm_buildings import (
     _estimate_heights,
     _rasterize_buildings,

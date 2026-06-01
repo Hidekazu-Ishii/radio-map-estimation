@@ -15,9 +15,5 @@ areas:
     year: 2023
     citygml_url: "https://assets.cms.plateau.reearth.io/assets/0c/b282cf-c242-4dd7-af9b-4ec3d4373018/13102_chuo-ku_pref_2023_citygml_2_op.zip"
 
-# ZIP の保存先: data/raw/<city_code>_<city_name>_<year>.zip
-# GDF の出力先: data/raw/<city_code>_<city_name>_<year>_.parquet
-raw_dir: "data/raw"
-
 # GeoDataFrame の出力フォーマット
 output_format: "geoparquet"   # "geoparquet" or "geojson"

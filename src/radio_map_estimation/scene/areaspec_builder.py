@@ -1,15 +1,21 @@
 """
 origin (地理座標) から AreaSpec を構築する
 
-役割:
+役割
+----
 origin_lon/lat + area_size_m → EPSG:6677 投影変換 → bbox 計算 → AreaSpec
 
+ローカル座標系:
+    origin (エリア左下隅) の投影座標 (origin_proj_x, origin_proj_y) を原点 (0, 0) とする
+    有効エリア x, y ∈ [0, area_size_m]
+    マージン部分 x, y ∈ [-margin, 0) および (area_size_m, area_size_m + margin]
+
 bbox の定義:
-    margin    = area_size_m / 5
-    bbox_xmin = ox - margin         (ローカル座標で -margin に対応)
-    bbox_xmax = ox + area_size_m + margin
-    bbox_ymin = oy - margin         (ローカル座標で -margin に対応)
-    bbox_ymax = oy + area_size_m + margin
+    margin      = area_size_m / 5
+    bbox_xmin   = origin_proj_x - margin
+    bbox_xmax   = origin_proj_x + area_size_m + margin
+    bbox_ymin   = origin_proj_y - margin
+    bbox_ymax   = origin_proj_y + area_size_m + margin
 """
 
 from __future__ import annotations
@@ -44,7 +50,8 @@ def build_area_spec(
     Returns
     -------
     AreaSpec
-        bbox_xmin/ymin は origin より margin だけ負方向に広げた値
+        origin_proj_x/y : ローカル座標の原点 (geo_to_local の ox, oy に使用)
+        bbox_xmin/ymin  : origin より margin だけ負方向に広げた値
     """
     origin_proj = gpd.GeoSeries([Point(origin_lon, origin_lat)], crs=_INPUT_CRS).to_crs(_PROJ_CRS).iloc[0]
     ox, oy = origin_proj.x, origin_proj.y  # type: ignore
@@ -72,6 +79,8 @@ def build_area_spec(
         origin_lon=origin_lon,
         area_size_m=area_size_m,
         crs=_PROJ_CRS,
+        origin_proj_x=ox,
+        origin_proj_y=oy,
         bbox_xmin=bbox_xmin,
         bbox_ymin=bbox_ymin,
         bbox_xmax=bbox_xmax,
