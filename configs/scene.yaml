@@ -5,7 +5,7 @@
 cities:
   - city_dir: 13101_chiyoda-ku_2023
     mesh_codes:
-      #- "53394529"
+      - "53394539"
       - "53394630"
   - city_dir: 13102_chuo-ku_2023
     mesh_codes:

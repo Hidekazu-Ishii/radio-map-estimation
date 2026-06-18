@@ -32,7 +32,7 @@ def build_bldg_mask(
     bldg_footprint_ply_path: Path,
     area_size_m: float,
     cell_size_m: float,
-    coverage_ratio: float = 0.75,
+    coverage_ratio: float = 0.99,
 ) -> np.ndarray:
     """
     bldg_footprint.ply から建物上セルのマスクを生成する

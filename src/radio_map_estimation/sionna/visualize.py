@@ -5,15 +5,15 @@ radio map の PNG / npz 保存
 ----
 1. MeshRadioMap → scene.render_to_file() で radio_map_3d.png
 2. PlanarRadioMap → show() / show_association() で 2D マップを PNG 保存
-3. npz に数値データを保存 (rss_gt.npz / rss.npz)
+3. npz に数値データを保存 (radio_map.npz)
 
 npz の配列定義:
     rss_dbm_raw        : Sionna RT 生出力 (ノイズなし、マスクなし)
-    rss_dbm            : ノイズ付加済み (建物上マスクなし)
-    rss_dbm_gt         : 真値 (建物上マスク適用済み、ノイズ付加済み)
-    rss_dbm_observable : 観測可能点のみ (建物上 + 検出不可能を除外、ノイズ付加済み)
-    mask_observed      : 観測点候補マスク (True = 観測可能)
-    mask_estimable     : 推定対象マスク (True = 建物上でない)
+    rss_dbm_noise      : ノイズ付加済み (建物上マスクなし)
+    rss_dbm_gt         : 真値 (建物上 + 検出不可能を除外、ノイズ付加済み、それ以外は nan)
+    mask_on_bldg       : 建物マスク (True = 建物上)
+    mask_detectable    : 観測可能マスク (True = 観測可能)
+    tx_association     : 接続 TX インデックス (未到達セルは -1)
     tx_positions       : TX 位置
     cell_size_m        : セルサイズ [m]
     noise_std_db       : 観測ノイズ標準偏差 [dB]
@@ -24,8 +24,8 @@ npz の配列定義:
     radio_map_rss.png         PlanarRadioMap: RSS [dBm]
     radio_map_sinr.png        PlanarRadioMap: SINR [dB]
     radio_map_association.png TX ごとの接続エリア
-    rss_gt.npz                全配列 (rss_dbm_raw / rss_dbm / rss_dbm_gt /
-                              rss_dbm_observable / mask_observed / mask_estimable /
+    radio_map.npz             全配列 (rss_dbm_raw / rss_dbm_noise / rss_dbm_gt /
+                              mask_on_bldg / mask_detectable / tx_association /
                               tx_positions / cell_size_m / noise_std_db)
 
 設計方針
@@ -124,8 +124,16 @@ def save_radio_maps(
     rss_w_max = rss_w_planar.max(axis=0)
     rss_dbm_raw: np.ndarray = 10.0 * np.log10(rss_w_max / 1e-3 + 1e-30)
 
+    # 各セルに最も強い RSS を届けている TX インデックス (接続 TX)
+    # RSS が全 TX で 0 のセル (未到達) は -1 とする
+    tx_association: np.ndarray = np.where(
+        rss_w_max > 0,
+        np.argmax(rss_w_planar, axis=0),
+        -1,
+    ).astype(np.int32)
+
     noise: np.ndarray = rng.normal(0.0, noise_std_db, size=rss_dbm_raw.shape)
-    rss_dbm: np.ndarray = rss_dbm_raw + noise
+    rss_dbm_noise: np.ndarray = rss_dbm_raw + noise
 
     # 建物マスク (True = 建物上)
     mask_on_bldg: np.ndarray = build_bldg_mask(
@@ -134,37 +142,43 @@ def save_radio_maps(
         cell_size_m=cell_size_m,
     )
 
-    # mask_estimable: 建物上でない = 推定対象 (検出不可能点も含む)
-    mask_estimable: np.ndarray = ~mask_on_bldg
+    # 検出可能マスク (True = 検出可能)
+    mask_detectable: np.ndarray = rss_dbm_raw >= _UNDETECTABLE_THRESHOLD_DBM
 
-    # mask_observed: 推定対象 かつ 検出可能 = 観測点候補
-    mask_observed: np.ndarray = mask_estimable & (rss_dbm_raw >= _UNDETECTABLE_THRESHOLD_DBM)
+    # rss_dbm_gt: 建物上 + 検出不可能を除外した真値 (ノイズ付加済み、それ以外は nan)
+    rss_dbm_gt: np.ndarray = np.where(~mask_on_bldg & mask_detectable, rss_dbm_noise, np.nan)
 
-    # rss_dbm_gt: 真値 (建物上マスク適用済み、ノイズ付加済み)
-    rss_dbm_gt: np.ndarray = np.where(mask_estimable, rss_dbm, np.nan)
-
-    # rss_dbm_observable: 観測可能点のみ (建物上 + 検出不可能を除外、ノイズ付加済み)
-    rss_dbm_observable: np.ndarray = np.where(mask_observed, rss_dbm, np.nan)
-
+    n_total = mask_on_bldg.size
+    n_on_bldg = int(mask_on_bldg.sum())
+    n_detectable = int(mask_detectable.sum())
+    n_observable = int(np.sum(~np.isnan(rss_dbm_gt)))
     logger.info(
-        "Masks: estimable=%d/%d (%.1f%%), observed=%d/%d (%.1f%%)",
-        mask_estimable.sum(),
-        mask_estimable.size,
-        100.0 * mask_estimable.sum() / mask_estimable.size,
-        mask_observed.sum(),
-        mask_observed.size,
-        100.0 * mask_observed.sum() / mask_observed.size,
+        "Masks: on_bldg=%d/%d (%.1f%%), detectable=%d/%d (%.1f%%)",
+        n_on_bldg,
+        n_total,
+        100.0 * n_on_bldg / n_total,
+        n_detectable,
+        n_total,
+        100.0 * n_detectable / n_total,
+    )
+    logger.info(
+        "Observation rate (non_bldg and detectable): %d/%d (%.1f%%)",
+        n_observable,
+        n_total,
+        100.0 * n_observable / n_total,
     )
 
     # 3b. radio_map.npz: 全配列を保存
     np.savez(
         output_dir / "radio_map.npz",
         rss_dbm_raw=rss_dbm_raw,
-        rss_dbm=rss_dbm,
+        rss_dbm_noise=rss_dbm_noise,
         rss_dbm_gt=rss_dbm_gt,
-        rss_dbm_observable=rss_dbm_observable,
-        mask_observed=mask_observed,
-        mask_estimable=mask_estimable,
+        mask_on_bldg=mask_on_bldg,
+        mask_detectable=mask_detectable,
+        tx_association=tx_association,
         tx_positions=np.array(tx_positions),
+        cell_size_m=cell_size_m,
+        noise_std_db=noise_std_db,
     )
-    logger.info("Saved: %s", output_dir / "rss_gt.npz")
+    logger.info("Saved: %s", output_dir / "radio_map.npz")
