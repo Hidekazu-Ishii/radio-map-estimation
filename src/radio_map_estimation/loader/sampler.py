@@ -1,11 +1,13 @@
 # ruff: noqa: F722
 """
-観測可能点 (mask_observed=True) から train / test 点をサンプリングするモジュール
+train / test 点をサンプリングするモジュール
 
 サンプリング戦略:
-    1. mask_observed=True の全セルインデックスを取得
-    2. 全体から train_size 点を一括サンプリング
-    3. 残りから test_size 点をサンプリング (train と disjoint を保証)
+    train: (0, 0) - (area_size_m, area_size_m) の範囲で連続座標を一様サンプリングする
+           (不規則な座標配列)
+    test : 値の入っているセルインデックスを直接サンプリング (または全件取得) し、
+           左下端座標に変換する (セル格子に整列した座標配列)
+           train で使用したセルは除外し、disjoint を保証する
 """
 
 from __future__ import annotations
@@ -13,63 +15,7 @@ from __future__ import annotations
 import numpy as np
 from jaxtyping import Float, Int
 
-
-def sample_train_test_indices(
-    mask_observed: np.ndarray,
-    train_size: int,
-    test_size: int,
-    rng: np.random.Generator,
-) -> tuple[
-    Int[np.ndarray, "N 1"],  # train_rows
-    Int[np.ndarray, "N 1"],  # train_cols
-    Int[np.ndarray, "M 1"],  # test_rows
-    Int[np.ndarray, "M 1"],  # test_cols
-]:
-    """観測可能点から train / test のセルインデックスをサンプリングする
-
-    Parameters
-    ----------
-    mask_observed : (H, W) bool  観測可能マスク
-    train_size    : 学習点数
-    test_size     : 予測 (評価) 点数
-    rng           : 乱数生成器 (外部から受け取る)
-
-    Returns
-    -------
-    train_rows, train_cols : shape (N, 1) 学習点のセルインデックス
-    test_rows,  test_cols  : shape (M, 1) 予測点のセルインデックス (train と disjoint)
-
-    Raises
-    ------
-    ValueError
-        train_size + test_size が観測可能点数を超える場合
-    """
-    obs_rows, obs_cols = np.where(mask_observed)  # (num_obs,) それぞれ
-    num_obs = len(obs_rows)
-
-    if train_size + test_size > num_obs:
-        raise ValueError(
-            f"train_size + test_size ({train_size + test_size}) exceeds observable cells ({num_obs})"
-        )
-
-    all_indices = np.arange(num_obs)
-
-    # train をサンプリング
-    train_idx = rng.choice(all_indices, size=train_size, replace=False)
-    train_idx.sort()  # 再現確認のため整列
-
-    # 残りから test をサンプリング (disjoint 保証)
-    remaining = np.setdiff1d(all_indices, train_idx)
-    test_idx = rng.choice(remaining, size=test_size, replace=False)
-    test_idx.sort()
-
-    # shape を (N, 1) に統一
-    return (
-        obs_rows[train_idx].reshape(-1, 1),
-        obs_cols[train_idx].reshape(-1, 1),
-        obs_rows[test_idx].reshape(-1, 1),
-        obs_cols[test_idx].reshape(-1, 1),
-    )
+from ..utils.grid_transform import grid_point_to_index, snap_to_nearest_grid_point
 
 
 def cell_lower_left(
@@ -79,44 +25,153 @@ def cell_lower_left(
 ) -> Float[np.ndarray, "N 2"]:
     """セルインデックス (row, col) → 左下端座標 (x, y) [m] に変換する
 
-    グリッド定義:
-        x = col * cell_size_m
-        y = row * cell_size_m
-
     Parameters
     ----------
-    rows, cols   : shape (N, 1) セルの行・列インデックス
-    cell_size_m  : セルサイズ [m]
+    rows, cols  : shape (N,) セルの行・列インデックス
+    cell_size_m : セルサイズ [m]
 
     Returns
     -------
     coords : shape (N, 2) 左下端座標 (x, y) [m]
     """
-    x = cols * cell_size_m  # (N, 1)
-    y = rows * cell_size_m  # (N, 1)
-    return np.concatenate([x, y], axis=1)  # (N, 2)
+    x = cols.astype(np.float64) * cell_size_m  # (N,)
+    y = rows.astype(np.float64) * cell_size_m  # (N,)
+    return np.stack([x, y], axis=-1)  # (N, 2)
 
 
-def resolve_tx_positions(
-    rows: Int[np.ndarray, "N 1"],
-    cols: Int[np.ndarray, "N 1"],
-    tx_association: Int[np.ndarray, "H W"],
-    tx_positions: Float[np.ndarray, "T 3"],
-) -> tuple[Float[np.ndarray, "N 3"], Int[np.ndarray, "N 1"]]:
-    """セルインデックスから接続TX座標と接続TXインデックスを取得する
+def _sample_train_points(
+    rss_dbm_gt: Float[np.ndarray, "H W"],
+    area_size_m: float,
+    cell_size_m: float,
+    train_size: int,
+    rng: np.random.Generator,
+) -> tuple[Float[np.ndarray, "N 2"], Float[np.ndarray, "N 1"], set[int]]:
+    """連続座標を一様サンプリングし、有効な (座標, 値) を train_size 個集める (不規則座標)
+
+    座標は連続値のまま保存する (train は格子に整列しない不規則座標)。
+    セル所属判定のみ snap_to_nearest_grid_point + grid_point_to_index で行う。
+    """
+    height, width = rss_dbm_gt.shape
+    collected_coords: list[np.ndarray] = []
+    collected_values: list[float] = []
+    used_flat_indices: set[int] = set()
+
+    while len(collected_coords) < train_size:
+        num_needed = train_size - len(collected_coords)
+        batch_size = num_needed * 4  # nan / 重複による棄却を見込んで多めにサンプリング
+
+        xy = rng.uniform(0.0, area_size_m, size=(batch_size, 2))  # (batch_size, 2) 連続座標
+
+        grid_points = snap_to_nearest_grid_point(xy, cell_size_m)  # (batch_size, 2)
+        cell_indices = grid_point_to_index(grid_points, cell_size_m)  # (batch_size, 2)
+        rows = np.minimum(cell_indices[:, 0], height - 1)
+        cols = np.minimum(cell_indices[:, 1], width - 1)
+        flat_indices = rows * width + cols  # (batch_size,)
+
+        values = rss_dbm_gt[rows, cols]  # (batch_size,)
+        is_valid = ~np.isnan(values)
+
+        for x, y, value, flat_idx, valid in zip(
+            xy[:, 0], xy[:, 1], values, flat_indices, is_valid, strict=False
+        ):
+            if len(collected_coords) >= train_size:
+                break
+            if not valid or flat_idx in used_flat_indices:
+                continue
+
+            collected_coords.append(np.array([x, y]))  # 連続座標のまま保存
+            collected_values.append(value)
+            used_flat_indices.add(int(flat_idx))
+
+    coords = np.stack(collected_coords, axis=0)  # (train_size, 2)
+    rss_dbm = np.asarray(collected_values, dtype=np.float64).reshape(-1, 1)  # (train_size, 1)
+
+    return coords, rss_dbm, used_flat_indices
+
+
+def _sample_test_cells(
+    rss_dbm_gt: Float[np.ndarray, "H W"],
+    cell_size_m: float,
+    test_size: int | None,
+    rng: np.random.Generator,
+    excluded_flat_indices: set[int],
+) -> tuple[Float[np.ndarray, "M 2"], Float[np.ndarray, "M 1"]]:
+    """train で使用したセルを除く有効セルから test 点を取得する (セル格子に整列した座標)
+
+    test_size が None の場合は該当する全セルを、int の場合はその個数だけランダムに
+    セルインデックスを直接サンプリングする。
 
     Parameters
     ----------
-    rows, cols      : shape (N, 1) サンプリング済みセルの行・列インデックス
-    tx_association  : (H, W) 各セルの接続TXインデックス (-1 = 未到達)
-    tx_positions    : (T, 3) TX位置 [m] (npz の tx_positions キー)
+    rss_dbm_gt             : (H, W) 真値マップ (欠測は nan)
+    cell_size_m            : セルサイズ [m]
+    test_size              : 取得するセル数。None なら全件
+    rng                    : 乱数生成器 (外部から受け取る)
+    excluded_flat_indices  : train で採用済みのフラットセルインデックス
 
     Returns
     -------
-    tx_coords   : shape (N, 3) 接続TX座標 (モデルへの入力特徴量)
-    tx_indices  : shape (N, 1) 接続TXインデックス
+    coords  : shape (M, 2) 左下端座標 (x, y) [m]
+    rss_dbm : shape (M, 1) 対応する値
     """
-    # rows, cols は (N, 1) のため squeeze して 2D インデックスとして使用
-    tx_indices = tx_association[rows.squeeze(1), cols.squeeze(1)]  # (N,)
-    tx_coords = tx_positions[tx_indices]  # (N, 3)
-    return tx_coords, tx_indices.reshape(-1, 1)  # (N, 3), (N, 1)
+    height, width = rss_dbm_gt.shape
+    valid_flat_indices = np.flatnonzero(~np.isnan(rss_dbm_gt))  # (num_valid,)
+
+    excluded_mask = np.isin(valid_flat_indices, np.fromiter(excluded_flat_indices, dtype=np.int64))
+    remaining_flat_indices = valid_flat_indices[~excluded_mask]  # (num_remaining,)
+
+    if test_size is not None:
+        if test_size > len(remaining_flat_indices):
+            raise ValueError(
+                f"test_size ({test_size}) exceeds remaining observable cells ({len(remaining_flat_indices)})"
+            )
+        remaining_flat_indices = rng.choice(remaining_flat_indices, size=test_size, replace=False)
+        remaining_flat_indices = np.sort(remaining_flat_indices)
+
+    rows, cols = np.unravel_index(remaining_flat_indices, (height, width))
+    coords = cell_lower_left(rows, cols, cell_size_m)  # (M, 2)
+    rss_dbm = rss_dbm_gt[rows, cols].reshape(-1, 1)  # (M, 1)
+
+    return coords, rss_dbm
+
+
+def sample_train_test_points(
+    rss_dbm_gt: Float[np.ndarray, "H W"],
+    area_size_m: float,
+    cell_size_m: float,
+    train_size: int,
+    test_size: int | None,
+    rng: np.random.Generator,
+) -> tuple[
+    Float[np.ndarray, "N 2"],  # train_coords (x, y) 不規則な連続座標
+    Float[np.ndarray, "N 1"],  # train_rss_dbm
+    Float[np.ndarray, "M 2"],  # test_coords (x, y) 左下端座標 (セル格子に整列)
+    Float[np.ndarray, "M 1"],  # test_rss_dbm
+]:
+    """(0, 0)-(area_size_m, area_size_m) から train / test 点をサンプリングする
+
+    Parameters
+    ----------
+    rss_dbm_gt  : (H, W) 真値マップ (欠測は nan)
+    area_size_m : サンプリング範囲の一辺 [m]
+    cell_size_m : セルサイズ [m]
+    train_size  : 学習点数
+    test_size   : 予測 (評価) 点数。None の場合は、train で使用したセルを除く
+                  全ての有効セルを test とする
+    rng         : 乱数生成器 (外部から受け取る)
+
+    Returns
+    -------
+    train_coords, train_rss_dbm : 学習用の不規則な連続座標と値
+    test_coords, test_rss_dbm   : 評価用の左下端座標(セル格子に整列)と値
+                                   (train と使用セルが disjoint)
+    """
+    train_coords, train_rss_dbm, train_flat_indices = _sample_train_points(
+        rss_dbm_gt, area_size_m, cell_size_m, train_size, rng
+    )
+
+    test_coords, test_rss_dbm = _sample_test_cells(
+        rss_dbm_gt, cell_size_m, test_size, rng, excluded_flat_indices=train_flat_indices
+    )
+
+    return train_coords, train_rss_dbm, test_coords, test_rss_dbm

@@ -55,6 +55,10 @@ def _build_surface_geodataframe(
         if len(surface) >= 3
     ]
     logger.info("%s: built %d polygons", label, len(records))
+
+    if not records:
+        return gpd.GeoDataFrame(columns=["geometry", "surfaces"], geometry="geometry", crs=_INPUT_CRS)
+
     return gpd.GeoDataFrame(pd.DataFrame(records), geometry="geometry", crs=_INPUT_CRS)
 
 

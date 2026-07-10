@@ -1,19 +1,55 @@
-# PLATEAU データ取得設定
+# PLATEAU データ取得 + シーン構築設定
 # ダウンロード元: G空間情報センター (geospatial.jp)
 # ライセンス: PLATEAU Site Policy「３．著作権について」に拠る
 # https://www.mlit.go.jp/plateau/site-policy/
 
 # 対象とするエリアはここに追加
+# G空間情報センターのダウンロードURL（CityGML v4）
 areas:
+  - city_code: "08220"
+    city_name: "tsukuba-shi"
+    year: 2023
+    city_dir: "08220_tsukuba-shi_2023"
+    mesh_codes:
+      - "54400099"
+    citygml_url: "https://assets.cms.plateau.reearth.io/assets/2a/a9a3a8-5830-48dc-991e-92c2b8939436/08220_tsukuba-shi_city_2023_citygml_2_op.zip"
   - city_code: "13101"
     city_name: "chiyoda-ku"
     year: 2023
-    # G空間情報センターのダウンロードURL（CityGML v4）
+    city_dir: "13101_chiyoda-ku_2023"
+    mesh_codes:
+      - "53394539"
     citygml_url: "https://assets.cms.plateau.reearth.io/assets/f0/8694c9-c697-4c07-96fc-720b6f61b06b/13101_chiyoda-ku_pref_2023_citygml_2_op.zip"
   - city_code: "13102"
     city_name: "chuo-ku"
     year: 2023
+    city_dir: "13102_chuo-ku_2023"  # 中央区は一番きつい
+    mesh_codes:
+      - "53394601"
     citygml_url: "https://assets.cms.plateau.reearth.io/assets/0c/b282cf-c242-4dd7-af9b-4ec3d4373018/13102_chuo-ku_pref_2023_citygml_2_op.zip"
-
+  - city_code: "13103"
+    city_name: "minato-ku"
+    year: 2023
+    city_dir: "13103_minato-ku_2023"
+    mesh_codes:
+      - "53393599"
+    citygml_url: "https://assets.cms.plateau.reearth.io/assets/36/598fa9-8acd-44cf-85da-2511783b51dc/13103_minato-ku_pref_2023_citygml_2_op.zip"
+  - city_code: "13116"
+    city_name: "toshima-ku"
+    year: 2023
+    city_dir: "13116_toshima-ku_2023"
+    mesh_codes: 
+      - "53394576"
+    citygml_url: "https://assets.cms.plateau.reearth.io/assets/42/94f2ba-d007-47f9-93c3-3f21fbcde827/13116_toshima-ku_pref_2023_citygml_2_op.zip"
+  
 # GeoDataFrame の出力フォーマット
 output_format: "geoparquet"   # "geoparquet" or "geojson"
+
+# エリアの一辺の長さ [m]（全 city 共通）
+# 3次メッシュ 1枚 ≈ 緯度30秒 × 経度45秒 ≈ 1km²
+# bbox はこの値の 1/5 のマージンを加えて取得される
+area_size_m: 1000.0
+margin_m: 200.0
+
+# bldg_mask のセルサイズ [m]
+bldg_cell_size_m: 1.0

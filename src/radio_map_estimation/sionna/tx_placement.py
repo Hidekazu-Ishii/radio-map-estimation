@@ -60,6 +60,7 @@ def _build_candidates(
 def build_tx_positions(
     bldg_ply_path: Path,
     num_tx: int,
+    center_search_radius_m,
     min_separation_m: float,
     area_size_m: float,
 ) -> list[tuple[float, float, float]]:
@@ -68,10 +69,10 @@ def build_tx_positions(
 
     処理フロー:
         1. mesh.split() で建物ごとに分離し、各建物の候補点 (重心 x,y + 屋根最高 z) を生成
-        2. 候補エリアを外周 20% を除いた内側に限定
+        2. 候補エリアを限定
            [area_size_m/5, area_size_m*4/5] x [area_size_m/5, area_size_m*4/5]
-        3. 0局目: エリア中心 (area_size_m/2, area_size_m/2) から
-           min_separation_m/2 以内の候補の中で z 最大の建物に配置する
+        3. 1局目: エリア中心 (area_size_m/2, area_size_m/2) から
+           center_search_radius_m 以内の候補の中で z 最大の建物に配置する
            候補がない場合は available な全候補から argmax(z) にフォールバック
         4. 1局目以降: available な候補の中で z 最大の建物を TX として選択
         5. 配置済み全 TX から min_separation_m 未満の候補を除外
@@ -133,11 +134,11 @@ def build_tx_positions(
                 f"Cannot place TX {i}/{num_tx}: no available candidates. "
                 f"Try reducing num_tx or min_separation_m ({min_separation_m} m)."
             )
-
-            # if i == 0:
-            # 0局目: エリア中心から min_separation_m / 2 以内の候補の中で z 最大
+        # 1局目の配置ロジック
+        elif i == 0:
+            # エリア中心から center_search_radius_m 以内の候補の中で z 最大
             center_dists = np.hypot(cands[:, 0] - ecx, cands[:, 1] - ecy)
-            near_center = available & (center_dists <= min_separation_m / 2)
+            near_center = available & (center_dists <= center_search_radius_m)
             if near_center.any():
                 near_candidates = np.where(near_center)[0]
                 idx = near_candidates[int(np.argmax(cands[near_candidates, 2]))]
@@ -145,18 +146,19 @@ def build_tx_positions(
                     "TX%d: placed near center (%d candidates within %.0f m of center)",
                     i,
                     near_center.sum(),
-                    min_separation_m / 2,
+                    center_search_radius_m,
                 )
             else:
                 # フォールバック: 中央付近に建物がない場合は全候補から argmax(z)
                 logger.warning(
                     "TX%d: no candidates within %.0f m of center, falling back to available argmax(z).",
                     i,
-                    min_separation_m / 2,
+                    center_search_radius_m,
                 )
                 idx = candidates[int(np.argmax(cands[candidates, 2]))]
+        # 2局目の配置ロジック
         else:
-            # 1局目以降: available な候補の中で z 最大
+            # available な候補の中で z 最大
             idx = candidates[int(np.argmax(cands[candidates, 2]))]
 
         tx_x, tx_y = float(cands[idx, 0]), float(cands[idx, 1])

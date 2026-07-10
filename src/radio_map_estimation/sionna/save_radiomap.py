@@ -11,11 +11,14 @@ npz の配列定義:
     rss_dbm_raw        : Sionna RT 生出力 (ノイズなし、マスクなし)
     rss_dbm_noise      : ノイズ付加済み (建物上マスクなし)
     rss_dbm_gt         : 真値 (建物上 + 検出不可能を除外、ノイズ付加済み、それ以外は nan)
-    mask_on_bldg       : 建物マスク (True = 建物上)
+    bldg_mask       : 建物マスク (True = 建物上)
     mask_detectable    : 観測可能マスク (True = 観測可能)
     tx_association     : 接続 TX インデックス (未到達セルは -1)
     tx_positions       : TX 位置
     cell_size_m        : セルサイズ [m]
+    freq_hz            : 搬送波周波数 [Hz]
+    tx_power_dbm       : 送信電力 [dBm]
+    rx_height_m        : 受信機高さ [m]
     noise_std_db       : 観測ノイズ標準偏差 [dB]
 
 出力ファイル:
@@ -25,8 +28,8 @@ npz の配列定義:
     radio_map_sinr.png        PlanarRadioMap: SINR [dB]
     radio_map_association.png TX ごとの接続エリア
     radio_map.npz             全配列 (rss_dbm_raw / rss_dbm_noise / rss_dbm_gt /
-                              mask_on_bldg / mask_detectable / tx_association /
-                              tx_positions / cell_size_m / noise_std_db)
+                              bldg_mask / mask_detectable / tx_association /
+                              tx_positions / cell_size_m / freq_hz / noise_std_db)
 
 設計方針
 --------
@@ -46,7 +49,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from radio_map_estimation.sionna.bldg_mask import build_bldg_mask
+from radio_map_estimation.utils.visualize import save_rss_png
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +61,13 @@ def save_radio_maps(
     scene,
     mesh_radio_map,
     planar_radio_map,
+    rss_dbm: np.ndarray,
     tx_positions: list[tuple[float, float, float]],
-    cell_size_m: float,
-    noise_std_db: float,
-    rng: np.random.Generator,
+    freq_hz: float,
+    cfg,
     area_size_m: float,
-    bldg_footprint_ply_path: Path,
+    bldg_mask: np.ndarray,
+    rng: np.random.Generator,
     output_dir: Path,
 ) -> None:
     """
@@ -75,16 +79,17 @@ def save_radio_maps(
     mesh_radio_map   : MeshRadioMap (radiomap.build_radio_maps の出力)
     planar_radio_map : PlanarRadioMap (radiomap.build_radio_maps の出力)
     tx_positions     : TX 位置のリスト
-    cell_size_m      : セルサイズ [m]
+    cell_size_m      : RadioMap のセルサイズ [m]
+    freq_hz          : 搬送波周波数 [Hz]
+    tx_power_dbm     : 送信電力 [dBm]
+    rx_height_m      : 受信機高さ [m]
     noise_std_db     : 観測ノイズの標準偏差 [dB]
     rng              : NumPy 乱数ジェネレータ (再現性のため外部から受け渡す)
     area_size_m      : 対象エリアの一辺の長さ [m]
-    bldg_footprint_ply_path : bldg_footprint.ply のパス (建物マスク生成に使用)
+    bldg_mask     : 建物マスク
     output_dir       : 出力ディレクトリ
     """
     from sionna.rt import Camera
-
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. 3D シーン + RSS オーバーレイ (MeshRadioMap)
     cam = Camera(position=[500.0, -1000.0, 1500.0])  # type: ignore
@@ -115,70 +120,52 @@ def save_radio_maps(
     logger.info("Saved: %s", out)
 
     # 3. npz 保存
-    # 3a. 各配列の計算
-    # MeshRadioMap: 3D レンダリング用 (不規則な DEM メッシュ上の点群)
-    # PlanarRadioMap: グリッド上の RSS (mask / npz 保存はこちらを使用)
-    rss_w_planar = np.array(planar_radio_map.rss)  # (num_tx, num_cells_y, num_cells_x)
-
     # num_tx > 1 の場合は全 TX の最大値を取る → (num_cells_y, num_cells_x)
-    rss_w_max = rss_w_planar.max(axis=0)
-    rss_dbm_raw: np.ndarray = 10.0 * np.log10(rss_w_max / 1e-3 + 1e-30)
+    rss_dbm_raw: np.ndarray = rss_dbm.max(axis=0)  # (H, W)
+
+    # 観測ノイズ (ホワイトノイズ) の付加 + 検出可能
+    noise: np.ndarray = rng.normal(0.0, cfg.noise_std_db, size=rss_dbm_raw.shape)
+    rss_dbm_obs: np.ndarray = rss_dbm_raw + noise
+    rss_dbm_obs[rss_dbm_obs < _UNDETECTABLE_THRESHOLD_DBM] = np.nan
+
+    # 3a. 平均済み RSS の可視化 (学習データ本命、フェージング低減済み)
+    save_rss_png(
+        rss_dbm=rss_dbm_obs,
+        tx_coords=np.array(tx_positions),
+        area_size_m=area_size_m,
+        output_path=output_dir / "radio_map_rss_dbm.png",
+        title=f"RSS ({freq_hz / 1e9:.1f} GHz)",
+        bldg_mask=bldg_mask,
+    )
 
     # 各セルに最も強い RSS を届けている TX インデックス (接続 TX)
     # RSS が全 TX で 0 のセル (未到達) は -1 とする
     tx_association: np.ndarray = np.where(
-        rss_w_max > 0,
-        np.argmax(rss_w_planar, axis=0),
+        ~np.isnan(rss_dbm_obs),
+        np.argmax(rss_dbm, axis=0),
         -1,
     ).astype(np.int32)
 
-    noise: np.ndarray = rng.normal(0.0, noise_std_db, size=rss_dbm_raw.shape)
-    rss_dbm_noise: np.ndarray = rss_dbm_raw + noise
-
-    # 建物マスク (True = 建物上)
-    mask_on_bldg: np.ndarray = build_bldg_mask(
-        bldg_footprint_ply_path=bldg_footprint_ply_path,
-        area_size_m=area_size_m,
-        cell_size_m=cell_size_m,
-    )
-
-    # 検出可能マスク (True = 検出可能)
-    mask_detectable: np.ndarray = rss_dbm_raw >= _UNDETECTABLE_THRESHOLD_DBM
-
-    # rss_dbm_gt: 建物上 + 検出不可能を除外した真値 (ノイズ付加済み、それ以外は nan)
-    rss_dbm_gt: np.ndarray = np.where(~mask_on_bldg & mask_detectable, rss_dbm_noise, np.nan)
-
-    n_total = mask_on_bldg.size
-    n_on_bldg = int(mask_on_bldg.sum())
-    n_detectable = int(mask_detectable.sum())
-    n_observable = int(np.sum(~np.isnan(rss_dbm_gt)))
+    n_total_rm = (int(area_size_m / cfg.cell_size_m)) ** 2
+    n_observable = int(np.sum(~np.isnan(rss_dbm_obs)))
     logger.info(
-        "Masks: on_bldg=%d/%d (%.1f%%), detectable=%d/%d (%.1f%%)",
-        n_on_bldg,
-        n_total,
-        100.0 * n_on_bldg / n_total,
-        n_detectable,
-        n_total,
-        100.0 * n_detectable / n_total,
-    )
-    logger.info(
-        "Observation rate (non_bldg and detectable): %d/%d (%.1f%%)",
+        "Observation rate (detectable): %d/%d (%.1f%%)",
         n_observable,
-        n_total,
-        100.0 * n_observable / n_total,
+        n_total_rm,
+        100.0 * n_observable / n_total_rm,
     )
 
-    # 3b. radio_map.npz: 全配列を保存
+    # radio_map.npz: 全配列を保存
     np.savez(
         output_dir / "radio_map.npz",
         rss_dbm_raw=rss_dbm_raw,
-        rss_dbm_noise=rss_dbm_noise,
-        rss_dbm_gt=rss_dbm_gt,
-        mask_on_bldg=mask_on_bldg,
-        mask_detectable=mask_detectable,
+        rss_dbm_gt=rss_dbm_obs,
         tx_association=tx_association,
         tx_positions=np.array(tx_positions),
-        cell_size_m=cell_size_m,
-        noise_std_db=noise_std_db,
+        cell_size_m=cfg.cell_size_m,
+        freq_hz=freq_hz,
+        tx_power_dbm=cfg.tx_power_dbm,
+        rx_height_m=cfg.rx_height_m,
+        noise_std_db=cfg.noise_std_db,
     )
     logger.info("Saved: %s", output_dir / "radio_map.npz")

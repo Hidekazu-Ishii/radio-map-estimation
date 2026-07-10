@@ -111,12 +111,15 @@ def build_radio_maps(
     tx_positions: list[tuple[float, float, float]],
     cfg,
     area_size_m: float,
-) -> list[tuple[float, object, object, object]]:
+) -> list[tuple[float, object, object, object, np.ndarray]]:
     """
     Sionna RT シーンをロードし、各周波数の MeshRadioMap と PlanarRadioMap を計算する。
 
     シーンロードと TX 配置は1回のみ行い、cfg.frequency_hz のリストをループして
     scene.frequency を更新しながらシミュレーションを実行する。
+    複数シードの RSS [W] 平均によりフェージングを低減する (cfg.num_seeds 回実行) 。
+    RadioMap オブジェクト (可視化用) と平均済み ndarray (学習データ用) の
+    両方を返す。
 
     Parameters
     ----------
@@ -127,18 +130,25 @@ def build_radio_maps(
 
     Returns
     -------
-    list of (freq_hz, scene, mesh_radio_map, planar_radio_map)
+    list of (freq_hz, scene, mesh_radio_map, planar_radio_map, planar_avg_dbm)
         周波数ごとの結果リスト。scene は全周波数で共通 (frequency が更新済み)
     """
+    from .incoherent_patch import apply_incoherent_patch
+
+    # フェージング除去
+    apply_incoherent_patch()
+
     from sionna.rt import RadioMapSolver
 
     # シーンロード・TX 配置は1回のみ
     scene, measurement_surface = _load_scene(xml_path, tx_positions, cfg)
 
     rm_solver = RadioMapSolver()
-    results: list[tuple[float, object, object, object]] = []
+    results: list[tuple[float, object, object, object, np.ndarray]] = []
 
     for freq_hz in cfg.frequency_hz:
+        # 周波数のみ差し替え (シーン・TX 配置は再利用)
+        scene.frequency = freq_hz
         logger.info(
             "Computing radio maps: freq=%.4gGHz, cell_size=%.1fm, max_depth=%d, samples=%d",
             freq_hz / 1e9,
@@ -147,9 +157,6 @@ def build_radio_maps(
             cfg.num_samples,
         )
 
-        # 周波数のみ差し替え (シーン・TX 配置は再利用)
-        scene.frequency = freq_hz
-
         # MeshRadioMap: DEM メッシュ上 (3D 俯瞰レンダリング用)
         mesh_radio_map = rm_solver(
             scene,
@@ -157,8 +164,8 @@ def build_radio_maps(
             max_depth=cfg.max_depth,
             samples_per_tx=cfg.num_samples,
             diffraction=True,
+            diffuse_reflection=True,
         )
-        logger.info("MeshRadioMap computed (%.4gGHz).", freq_hz / 1e9)
 
         # PlanarRadioMap: エリア [0, area_size_m] x [0, area_size_m] の水平面
         planar_radio_map = rm_solver(
@@ -170,9 +177,16 @@ def build_radio_maps(
             orientation=[0.0, 0.0, 0.0],  # type: ignore
             size=[area_size_m, area_size_m],  # type: ignore
             diffraction=True,
+            diffuse_reflection=True,
         )
-        logger.info("PlanarRadioMap computed (%.4gGHz).", freq_hz / 1e9)
 
-        results.append((freq_hz, scene, mesh_radio_map, planar_radio_map))
+        rss_w = np.array(planar_radio_map.rss)  # (num_tx, H, W) [W]
+
+        # W → dbm 変換
+        rss_dbm = 10.0 * np.log10(rss_w + 1e-30) + 30.0  # type: ignore
+
+        logger.info("RadioMap computed (%.4gGHz).", freq_hz / 1e9)
+
+        results.append((freq_hz, scene, mesh_radio_map, planar_radio_map, rss_dbm))
 
     return results

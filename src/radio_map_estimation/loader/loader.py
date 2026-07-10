@@ -1,105 +1,97 @@
+# ruff: noqa: F722
 """
-radio_map.npz から学習・予測用データセットを構築する
+学習・予測用データセットおよび静的情報を構築する
 
-処理フロー:
-    1. 読み込み済み npz データから配列を取得
-    2. rss_dbm_gt の nan マスクから観測可能セルを再構成
-    3. sampler でセルインデックスをサンプリング (train / test disjoint)
-    4. セルインデックス → グリッド左下端座標 (x, y) に変換
-    5. tx_association + tx_positions → 接続TX座標を付与
-    6. TrainData / TestData を返す
-
-Note:
-    npz の読み込み (np.load) とtrain_size の計算はエントリポイントで行う。
-    本モジュールは読み込み済みデータを受け取り、TrainData / TestData を返す。
+読み込み済みデータを受け取り、TrainData / TestData / GridInfo を返す。
 """
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
+from jaxtyping import Float
 
-from .dataset import TestData, TrainData
-from .sampler import cell_lower_left, resolve_tx_positions, sample_train_test_indices
+from .dataset import GridInfo, TestData, TrainData
+from .sampler import sample_train_test_points
 
-logger = logging.getLogger(__name__)
+
+def _broadcast_scalar(value: float, num_points: int) -> Float[np.ndarray, "N 1"]:
+    """スカラー値を (num_points, 1) に展開する"""
+    return np.full((num_points, 1), value, dtype=np.float64)
+
+
+def _broadcast_tx_coords(
+    tx_positions: Float[np.ndarray, "1 3"],
+    num_points: int,
+) -> Float[np.ndarray, "N 3"]:
+    """単一 TX 座標を (num_points, 3) に展開する"""
+    return np.tile(tx_positions, (num_points, 1))
 
 
 def load_dataset(
-    data: np.lib.npyio.NpzFile,
+    bldgmap_data: np.lib.npyio.NpzFile,
+    radiomap_data: np.lib.npyio.NpzFile,
     train_size: int,
-    test_size: int,
+    test_size: int | None,
     rng: np.random.Generator,
-) -> tuple[TrainData, TestData]:
+) -> tuple[TrainData, TestData, GridInfo]:
     """読み込み済み npz データから train / test データを返す
 
     Parameters
     ----------
-    data       : np.load() で読み込んだ NpzFile オブジェクト
-    train_size : 学習点数 (エントリポイントで train_rate から計算済み)
-    test_size  : 予測 (評価) 点数
-    rng        : 乱数生成器 (外部から受け取る、モジュール内で固定しない)
+    bldgmap_data  : np.load() で読み込んだ建物マップの NpzFile オブジェクト
+    radiomap_data : np.load() で読み込んだ電波マップの NpzFile オブジェクト
+    train_size    : 学習点数 (エントリポイントで train_rate から計算済み)
+    test_size     : 予測 (評価) 点数。None なら train 使用セルを除く全有効セル
+    rng           : 乱数生成器 (外部から受け取る、モジュール内で固定しない)
 
     Returns
     -------
-    train : TrainData
-    test  : TestData
+    train     : TrainData
+    test      : TestData
+    grid_info : GridInfo
 
     Raises
     ------
     ValueError
         train_size + test_size が観測可能点数を超える場合
     """
-    rss_dbm_gt: np.ndarray = data["rss_dbm_gt"]  # (H, W) float64, 建物上・未検出は nan
-    tx_association: np.ndarray = data["tx_association"]  # (H, W) int32
-    tx_positions: np.ndarray = data["tx_positions"]  # (T, 3) float64
-    cell_size_m: float = float(data["cell_size_m"])
+    bldg_mask: np.ndarray = bldgmap_data["bldg_mask"]
+    bldg_cell_size_m: float = float(bldgmap_data["bldg_cell_size_m"])
+    area_size_m: float = float(bldgmap_data["area_size_m"])
+    margin_m: float = float(bldgmap_data["margin_m"])
 
-    # 観測可能マスクを nan 埋めから再構成 (nan でない = 観測可能)
-    mask_observed: np.ndarray = ~np.isnan(rss_dbm_gt)  # (H, W) bool
+    rss_dbm_gt: np.ndarray = radiomap_data["rss_dbm_gt"]  # (H, W) float64, 未検出は nan
+    tx_positions: np.ndarray = radiomap_data["tx_positions"]  # (1, 3) float64
+    cell_size_m: float = float(radiomap_data["cell_size_m"])
+    freq_hz: float = float(radiomap_data["freq_hz"])
+    tx_power_dbm: float = float(radiomap_data["tx_power_dbm"])
+    rx_height_m: float = float(radiomap_data["rx_height_m"])
 
-    logger.info(
-        "Observable cells: %d  (train=%d, test=%d)",
-        int(mask_observed.sum()),
-        train_size,
-        test_size,
+    grid_info = GridInfo(bldg_mask, bldg_cell_size_m, cell_size_m, area_size_m, margin_m)
+
+    # train / test 点のサンプリング
+    train_coords, train_rss_dbm, test_coords, test_rss_dbm = sample_train_test_points(
+        rss_dbm_gt, area_size_m, cell_size_m, train_size=train_size, test_size=test_size, rng=rng
     )
 
-    # セルインデックスのサンプリング (train / test disjoint)
-    train_rows, train_cols, test_rows, test_cols = sample_train_test_indices(
-        mask_observed, train_size, test_size, rng
-    )
+    num_train = len(train_coords)
+    num_test = len(test_coords)
 
-    # グリッド左下端座標 (x, y) に変換
-    train_coords = cell_lower_left(train_rows, train_cols, cell_size_m)  # (N, 2)
-    test_coords = cell_lower_left(test_rows, test_cols, cell_size_m)  # (M, 2)
-
-    # 接続TX座標・インデックスを付与
-    train_tx_coords, train_tx_indices = resolve_tx_positions(
-        train_rows, train_cols, tx_association, tx_positions
-    )
-    test_tx_coords, test_tx_indices = resolve_tx_positions(test_rows, test_cols, tx_association, tx_positions)
-
-    # rows/cols は (N, 1) のため squeeze して 2D インデックスとして使用
     train = TrainData(
         coords=train_coords,
-        tx_coords=train_tx_coords,
-        tx_indices=train_tx_indices,
-        rss_dbm_obs=rss_dbm_gt[train_rows.squeeze(1), train_cols.squeeze(1)].reshape(-1, 1),
+        tx_coords=_broadcast_tx_coords(tx_positions, num_train),
+        rss_dbm_obs=train_rss_dbm,
+        freq_hz=_broadcast_scalar(freq_hz, num_train),
+        tx_power_dbm=_broadcast_scalar(tx_power_dbm, num_train),
+        rx_height_m=_broadcast_scalar(rx_height_m, num_train),
     )
     test = TestData(
         coords=test_coords,
-        tx_coords=test_tx_coords,
-        tx_indices=test_tx_indices,
-        rss_dbm_gt=rss_dbm_gt[test_rows.squeeze(1), test_cols.squeeze(1)].reshape(-1, 1),
+        tx_coords=_broadcast_tx_coords(tx_positions, num_test),
+        rss_dbm_gt=test_rss_dbm,
+        freq_hz=_broadcast_scalar(freq_hz, num_test),
+        tx_power_dbm=_broadcast_scalar(tx_power_dbm, num_test),
+        rx_height_m=_broadcast_scalar(rx_height_m, num_test),
     )
 
-    logger.info(
-        "Dataset loaded: train=%d, test=%d, num_tx=%d",
-        len(train),
-        len(test),
-        len(tx_positions),
-    )
-
-    return train, test
+    return train, test, grid_info

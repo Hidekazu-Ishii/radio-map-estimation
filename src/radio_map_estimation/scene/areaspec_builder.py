@@ -37,6 +37,7 @@ def build_area_spec(
     origin_lon: float,
     origin_lat: float,
     area_size_m: float,
+    margin_m: float,
 ) -> AreaSpec:
     """
     エリア左下隅の地理座標と一辺の長さから AreaSpec を構築する
@@ -46,21 +47,23 @@ def build_area_spec(
     origin_lon  : エリア左下隅の経度 [deg] (EPSG:6668)
     origin_lat  : エリア左下隅の緯度 [deg] (EPSG:6668)
     area_size_m : エリアの一辺の長さ [m] (正方形)
+    margin_m    : 有効エリア外側に広げるマージン [m]
+                  (呼び出し元で一度だけ計算し、build_bldg_mask 等にも
+                  同じ値を渡すこと。この関数内では再計算しない)
 
     Returns
     -------
     AreaSpec
         origin_proj_x/y : ローカル座標の原点 (geo_to_local の ox, oy に使用)
-        bbox_xmin/ymin  : origin より margin だけ負方向に広げた値
+        bbox_xmin/ymin  : origin より margin_m だけ負方向に広げた値
     """
     origin_proj = gpd.GeoSeries([Point(origin_lon, origin_lat)], crs=_INPUT_CRS).to_crs(_PROJ_CRS).iloc[0]
     ox, oy = origin_proj.x, origin_proj.y  # type: ignore
-    margin = area_size_m / 5
 
-    bbox_xmin = ox - margin
-    bbox_ymin = oy - margin
-    bbox_xmax = ox + area_size_m + margin
-    bbox_ymax = oy + area_size_m + margin
+    bbox_xmin = ox - margin_m
+    bbox_ymin = oy - margin_m
+    bbox_xmax = ox + area_size_m + margin_m
+    bbox_ymax = oy + area_size_m + margin_m
 
     logger.info(
         "AreaSpec: origin=(%.6f, %.6f) → proj=(%.2f, %.2f), bbox=[%.2f, %.2f, %.2f, %.2f]",

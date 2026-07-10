@@ -2,7 +2,7 @@
 PLATEAU データダウンロードのエントリポイント
 
 使い方:
-    uv run scripts/download_plateau.py configs/plateau_download.yaml > outputs/logs/0_download_plateau.log 2>&1
+    uv run scripts/download_plateau.py configs/plateau.yaml > outputs/logs/0_download_plateau.log 2>&1
 
 処理の流れ:
     CityGML ZIP (LOD0/1/2 を含む単一ファイル)
@@ -49,30 +49,36 @@ class AreaConfig:
     city_code: str
     city_name: str
     year: int
+    city_dir: str
+    mesh_codes: tuple[str, ...]
     citygml_url: str
 
 
 @dataclass(frozen=True)
-class PlateauDownloadConfig:
+class PlateauConfig:
     areas: tuple[AreaConfig, ...]
     output_format: str
+    area_size_m: float
 
     @classmethod
-    def from_omega(cls, cfg: DictConfig) -> "PlateauDownloadConfig":
+    def from_omega(cls, cfg: DictConfig) -> "PlateauConfig":
         fmt = cfg.get("output_format", "geoparquet")
         if fmt not in ("geoparquet", "geojson"):
             raise ValueError(f"output_format must be 'geoparquet' or 'geojson', got {fmt!r}")
         return cls(
             areas=tuple(
                 AreaConfig(
-                    city_code=a.city_code,
-                    city_name=a.city_name,
+                    city_code=str(a.city_code),
+                    city_name=str(a.city_name),
                     year=int(a.year),
-                    citygml_url=a.citygml_url,
+                    city_dir=str(a.city_dir),
+                    mesh_codes=tuple(str(c) for c in a.mesh_codes),
+                    citygml_url=str(a.citygml_url),
                 )
                 for a in cfg.areas
             ),
             output_format=fmt,
+            area_size_m=float(cfg.area_size_m),
         )
 
 
@@ -88,7 +94,7 @@ def _suffix(fmt: str) -> str:
 def main(config_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     raw_dir = root / "data" / "raw"
-    cfg = PlateauDownloadConfig.from_omega(OmegaConf.load(config_path))  # type: ignore
+    cfg = PlateauConfig.from_omega(OmegaConf.load(config_path))  # type: ignore
     suffix = _suffix(cfg.output_format)
 
     for area in cfg.areas:
