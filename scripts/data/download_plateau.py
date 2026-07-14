@@ -2,7 +2,7 @@
 PLATEAU データダウンロードのエントリポイント
 
 使い方:
-    uv run scripts/download_plateau.py configs/plateau.yaml > outputs/logs/0_download_plateau.log 2>&1
+    uv run scripts/data/download_plateau.py configs/plateau.yaml > outputs/logs/0_download_plateau.log 2>&1
 
 処理の流れ:
     CityGML ZIP (LOD0/1/2 を含む単一ファイル)

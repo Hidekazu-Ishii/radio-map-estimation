@@ -1,0 +1,21 @@
+# 実験設定
+run_id: "001_ffnn_los_v1" # 連番 + 変更点説明
+
+# 学習点数
+train_size: [256, 512, 1024]
+
+# 評価点数
+test_size: 1000
+
+# 繰り返し実験の設定
+n_trials: 5
+master_seed: 42 # trial_idx=i に対して master_seed + i を使用
+
+# パスロスモデル
+pathloss_model: ffnn # "ci" | "fi" | "ffnn" | "ffnn_los"
+
+# ffnn / ffnn_los を選択した場合のみ有効
+# ハイパーパラメータは静的に書かず、以下の run_id でチューニング済みの結果
+# (outputs/tuning_analysis/ffnn_los/best_{ffnn_tuning_run_id}.csv) を
+# (city_dir, mesh_code, freq_ghz) ごとに参照する
+ffnn_tuning_run_id: "tune_v1"

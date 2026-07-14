@@ -7,7 +7,7 @@ from pathlib import Path
 
 import matplotlib
 
-from ..utils.grid_transform import grid_point_to_index, snap_to_nearest_grid_point
+from ..utils.grid_transform import point_to_cell_index
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -40,8 +40,7 @@ def scatter_to_grid(
     n = int(area_size_m / cell_size_m)
     grid = np.full((n, n), np.nan)
 
-    grid_points = snap_to_nearest_grid_point(coords, cell_size_m)  # (N, 2)
-    cell_indices = grid_point_to_index(grid_points, cell_size_m)  # (N, 2)
+    cell_indices = point_to_cell_index(coords, cell_size_m)  # (N, 2) floor ベースの包含判定
     row_idx = np.minimum(cell_indices[:, 0], n - 1)
     col_idx = np.minimum(cell_indices[:, 1], n - 1)
 
@@ -54,7 +53,7 @@ def save_rss_png(
     area_size_m: float,
     output_path: Path,
     title: str,
-    rss_dbm: np.ndarray | None = None,
+    values_db: np.ndarray | None = None,
     bldg_mask: np.ndarray | None = None,
     vmin: float = -120.0,
     vmax: float = -60.0,
@@ -66,21 +65,21 @@ def save_rss_png(
 
     Parameters
     ----------
-    rss_dbm      : (H, W) ndarray [dBm] 未観測セルは nan
+    values_db      : (H, W) ndarray, 未観測セルは nan
     tx_coords    : (num_tx, 3) TX 座標 [m] (重複なし)
     area_size_m  : エリアサイズ [m] (軸ラベル用)
     output_path  : 保存先
     title        : プロットタイトル
-    bldg_mask : (H, W) bool。True のセルを灰色オーバーレイ
+    bldg_mask : (H, W) bool, True のセルを灰色オーバーレイ
     vmin, vmax   : カラーバー範囲 [dBm]
     """
     extent = [0, area_size_m, 0, area_size_m]
 
     fig, ax = plt.subplots(figsize=(7, 6))
 
-    if rss_dbm is not None:
+    if values_db is not None:
         im = ax.imshow(
-            rss_dbm,
+            values_db,
             origin="lower",
             extent=extent,  # type: ignore[arg-type]
             cmap="viridis",

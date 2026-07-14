@@ -2,7 +2,7 @@
 PLATEAU シーン構築 + Sionna RT シミュレーションの統合エントリポイント
 
 使い方:
-    uv run scripts/simulate.py configs/plateau.yaml configs/sionna.yaml
+    uv run scripts/data/simulate.py configs/plateau.yaml configs/sionna.yaml
 
 処理の流れ:
     configs/scene.yaml + configs/sionna.yaml
@@ -42,6 +42,7 @@ from radio_map_estimation.sionna.bldg_mask import build_bldg_mask
 from radio_map_estimation.sionna.radiomap import build_radio_maps
 from radio_map_estimation.sionna.save_radiomap import save_radio_maps
 from radio_map_estimation.sionna.tx_placement import build_tx_positions
+from radio_map_estimation.utils.naming import freq_dir_name
 from radio_map_estimation.utils.visualize import save_rss_png
 
 # from radio_map_estimation.scene.scene_preview import save_scene_preview
@@ -169,14 +170,6 @@ def _parquet_paths(data_dir: Path, city_dir: str) -> tuple[Path, Path, Path, Pat
         base / "tran.parquet",
         base / "wtr.parquet",
     )
-
-
-def _freq_dir_name(freq_hz: float) -> str:
-    """周波数 [Hz] からディレクトリ名を生成する。例: 2.0e9 → '2.0GHz'"""
-    ghz = freq_hz / 1e9
-    # 小数点以下の不要なゼロを除去しつつ最低1桁は残す
-    # 例: 2.0e9 → "2.0GHz", 3.5e9 → "3.5GHz", 10.0e9 → "10.0GHz"
-    return f"{ghz:.10g}GHz" if ghz != int(ghz) else f"{ghz:.1f}GHz"
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +317,7 @@ def main(plateau_config_path: Path, sionna_config_path: Path) -> None:
                 area_size_m=plateau_cfg.area_size_m,
                 output_path=output_dir / "bldg_mask.png",
                 title="Building mask",
-                rss_dbm=None,
+                values_db=None,
                 bldg_mask=bldg_mask,
             )
 
@@ -347,7 +340,7 @@ def main(plateau_config_path: Path, sionna_config_path: Path) -> None:
 
             # 9. 周波数ごとに結果を PNG / npz として保存
             for freq_hz, scene, mesh_radio_map, planar_radio_map, rss_dbm in radio_map_results:
-                freq_dir = output_dir / _freq_dir_name(freq_hz)
+                freq_dir = output_dir / freq_dir_name(freq_hz)
                 freq_dir.mkdir(parents=True, exist_ok=True)
                 logger.info("Saving radio maps: %s", freq_dir)
 

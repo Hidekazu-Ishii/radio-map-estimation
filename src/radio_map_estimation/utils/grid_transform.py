@@ -6,6 +6,27 @@ from jaxtyping import Float, Int
 from numpy import ndarray
 
 
+def point_to_cell_index(
+    points: Float[ndarray, "N 2"],
+    cell_size_m: float,
+) -> Int[ndarray, "N 2"]:
+    """連続座標 (x, y) → 含まれるセルの (row, col) インデックスに変換する (floor ベース、包含判定)
+
+    セルは半開区間 [col * cell_size_m, (col+1) * cell_size_m) x
+    [row * cell_size_m, (row+1) * cell_size_m) として定義される
+     (snap_to_nearest_grid_point の round ベースの最近傍スナップとは異なり、丸めは行わない)
+
+    points は x, y ともに 0 以上を前提とする
+
+    Returns:
+        座標が含まれるセルの (row, col) インデックス配列
+    """
+    indices = np.floor(points / cell_size_m).astype(np.int64)  # (N, 2)
+    row = indices[:, 1]
+    col = indices[:, 0]
+    return np.stack([row, col], axis=-1)
+
+
 def snap_to_nearest_grid_point(
     points: Float[ndarray, "N 2"],
     cell_size_m: float,
