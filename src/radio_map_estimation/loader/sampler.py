@@ -5,15 +5,15 @@ train / test 点をサンプリングするモジュール
 サンプリング戦略:
     train: (0, 0) - (area_size_m, area_size_m) の範囲で連続座標を一様サンプリングする
            (不規則な座標配列)
-    test : 値の入っているセルインデックスを直接サンプリング (または全件取得) し、
-           左下端座標に変換する (セル格子に整列した座標配列)
+    test : 有効セルをセル単位で選択したうえで、各セル内で連続座標を1点ずつ一様サンプリングする
+           (train と同じく不規則な連続座標。ただし disjoint 判定はセル単位で行う)
            train で使用したセルは除外し、disjoint を保証する
 
 pool 制約について:
     test_prod (本番評価用、固定) を一度確定した後、チューニング用の train_tune /
     test_tune のサンプリング、および本番学習用の train_prod のサンプリングは
-    pool_flat_indices の範囲内のみに制限しなければならない。
-    候補セルを絞る役割は `allowed_flat_indices` / `candidate_flat_indices` 引数が担う。
+    pool_flat_indices の範囲内のみに制限しなければならない.
+    候補セルを絞る役割は `allowed_flat_indices` / `candidate_flat_indices` 引数が担う.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from jaxtyping import Float, Int
 
-from ..utils.grid_transform import grid_point_to_index, snap_to_nearest_grid_point
+from ..utils.grid_transform import point_to_cell_index
 
 
 def cell_lower_left(
@@ -45,31 +45,63 @@ def cell_lower_left(
     return np.stack([x, y], axis=-1)  # (N, 2)
 
 
-def create_pool_test_split(
-    rss_dbm_gt: Float[np.ndarray, "H W"],
-    test_size: int,
+def _sample_point_in_cells(
+    rows: Int[np.ndarray, "N 1"],
+    cols: Int[np.ndarray, "N 1"],
+    cell_size_m: float,
     rng: np.random.Generator,
-) -> tuple[Int[np.ndarray, "T 1"], Int[np.ndarray, "P 1"]]:
-    """全有効セルから test_prod 用セルを一度だけ確定し、残りを pool として返す
+) -> Float[np.ndarray, "N 2"]:
+    """指定された各セル内で連続座標を1点ずつ一様サンプリングする
 
-    ここで確定した test_flat_indices は、以後チューニング処理には一切渡さないこと。
+    セルは半開区間 [col * cell_size_m, (col+1) * cell_size_m) x
+    [row * cell_size_m, (row+1) * cell_size_m) として定義される
+    (point_to_cell_index の floor ベース包含判定と整合させるため)
 
     Parameters
     ----------
-    rss_dbm_gt : (H, W) 真値マップ (欠測は nan)
-    test_size  : test_prod のセル数
-    rng        : 乱数生成器 (外部から受け取る)
+    rows, cols  : shape (N,) 対象セルの行・列インデックス
+    cell_size_m : セルサイズ [m]
+    rng         : 乱数生成器 (外部から受け取る)
 
     Returns
     -------
-    test_flat_indices : test_prod に属するフラットインデックス (昇順)
-    pool_flat_indices  : それ以外の有効セルのフラットインデックス (昇順)
+    coords : shape (N, 2) 各セル内でサンプリングした連続座標
+    """
+    lower_left = cell_lower_left(rows, cols, cell_size_m)  # (N, 2)
+    offsets = rng.uniform(0.0, cell_size_m, size=(len(rows), 2))  # (N, 2)
+    return lower_left + offsets
+
+
+def create_pool_test_split(
+    rss_dbm_gt: Float[np.ndarray, "H W"],
+    cell_size_m: float,
+    test_size: int,
+    rng: np.random.Generator,
+) -> tuple[Float[np.ndarray, "T 2"], Float[np.ndarray, "T 1"], Int[np.ndarray, "P 1"]]:
+    """全有効セルから test_prod 用の連続座標点を一度だけ確定し、残りセルを pool として返す
+
+    test_prod はこの時点で連続座標として固定する (以後セルインデックスには戻さない).
+    ここで確定した test_coords / test_rss_dbm は、以後チューニング処理には一切渡さないこと.
+
+    Parameters
+    ----------
+    rss_dbm_gt  : (H, W) 真値マップ (欠測は nan)
+    cell_size_m : セルサイズ [m] (test_prod 点をセル内に配置するために使う)
+    test_size   : test_prod の点数
+    rng         : 乱数生成器 (外部から受け取る)
+
+    Returns
+    -------
+    test_coords       : test_prod の連続座標 (対応セルのフラットインデックス昇順)
+    test_rss_dbm      : test_coords に対応する真値
+    pool_flat_indices : それ以外の有効セルのフラットインデックス (昇順)
 
     Raises
     ------
     ValueError
         test_size が有効セル数を超える場合
     """
+    height, width = rss_dbm_gt.shape
     valid_flat_indices = np.flatnonzero(~np.isnan(rss_dbm_gt))  # (num_valid,)
     if test_size > len(valid_flat_indices):
         raise ValueError(f"test_size ({test_size}) exceeds observable cells ({len(valid_flat_indices)})")
@@ -77,7 +109,12 @@ def create_pool_test_split(
     shuffled = rng.permutation(valid_flat_indices)
     test_flat_indices = np.sort(shuffled[:test_size])
     pool_flat_indices = np.sort(shuffled[test_size:])
-    return test_flat_indices, pool_flat_indices
+
+    rows, cols = np.unravel_index(test_flat_indices, (height, width))
+    test_coords = _sample_point_in_cells(rows, cols, cell_size_m, rng)  # (test_size, 2)
+    test_rss_dbm = rss_dbm_gt[rows, cols].reshape(-1, 1)  # (test_size, 1)
+
+    return test_coords, test_rss_dbm, pool_flat_indices
 
 
 def _sample_train_points(
@@ -90,11 +127,11 @@ def _sample_train_points(
 ) -> tuple[Float[np.ndarray, "N 2"], Float[np.ndarray, "N 1"], set[int]]:
     """連続座標を一様サンプリングし、有効な (座標, 値) を train_size 個集める (不規則座標)
 
-    座標は連続値のまま保存する (train は格子に整列しない不規則座標)。
-    セル所属判定のみ snap_to_nearest_grid_point + grid_point_to_index で行う。
+    座標は連続値のまま保存する (train は格子に整列しない不規則座標).
+    セル所属判定は point_to_cell_index (floor ベースのセル包含判定) で行う.
 
     allowed_flat_indices が与えられた場合、その集合に含まれるセルのみ採用する
-    (pool 制約。test_prod のセルを絶対に踏まないようにするための唯一の窓口)。
+    (pool 制約. test_prod のセルを絶対に踏まないようにするための唯一の窓口).
     """
     height, width = rss_dbm_gt.shape
     allowed_set = None if allowed_flat_indices is None else {int(i) for i in allowed_flat_indices}
@@ -109,8 +146,7 @@ def _sample_train_points(
 
         xy = rng.uniform(0.0, area_size_m, size=(batch_size, 2))  # (batch_size, 2) 連続座標
 
-        grid_points = snap_to_nearest_grid_point(xy, cell_size_m)  # (batch_size, 2)
-        cell_indices = grid_point_to_index(grid_points, cell_size_m)  # (batch_size, 2)
+        cell_indices = point_to_cell_index(xy, cell_size_m)  # (batch_size, 2) floor ベースのセル所属判定
         rows = np.minimum(cell_indices[:, 0], height - 1)
         cols = np.minimum(cell_indices[:, 1], width - 1)
         flat_indices = rows * width + cols  # (batch_size,)
@@ -138,7 +174,7 @@ def _sample_train_points(
     return coords, rss_dbm, used_flat_indices
 
 
-def _sample_test_cells(
+def _sample_test_points(
     rss_dbm_gt: Float[np.ndarray, "H W"],
     cell_size_m: float,
     test_size: int | None,
@@ -146,23 +182,26 @@ def _sample_test_cells(
     excluded_flat_indices: set[int],
     candidate_flat_indices: Int[np.ndarray, "K 1"] | None = None,
 ) -> tuple[Float[np.ndarray, "M 2"], Float[np.ndarray, "M 1"]]:
-    """train で使用したセルを除く有効セルから test 点を取得する (セル格子に整列した座標)
+    """train で使用したセルを除く有効セルから test 点を取得する
+
+    disjoint 判定はセル単位で行う (train が使用したセルは test で一切使わない).
+    座標自体は各セル内で連続一様サンプリングする (train の連続点とは独立).
 
     candidate_flat_indices が与えられた場合、その集合の中からのみ選ぶ
-    (pool 制約。None なら全有効セルが候補になる)。
+    (pool 制約. None なら全有効セルが候補になる).
 
     Parameters
     ----------
     rss_dbm_gt              : (H, W) 真値マップ (欠測は nan)
     cell_size_m             : セルサイズ [m]
-    test_size               : 取得するセル数。None なら該当する全件
+    test_size               : 選択するセル数 (=点数). None なら該当する全セルに1点ずつ発行
     rng                     : 乱数生成器 (外部から受け取る)
     excluded_flat_indices   : train で採用済みのフラットセルインデックス
     candidate_flat_indices  : 選択候補を制限する場合のフラットインデックス集合 (pool 制約)
 
     Returns
     -------
-    coords  : shape (M, 2) 左下端座標 (x, y) [m]
+    coords  : shape (M, 2) 各セル内でサンプリングした連続座標
     rss_dbm : shape (M, 1) 対応する値
     """
     height, width = rss_dbm_gt.shape
@@ -183,7 +222,7 @@ def _sample_test_cells(
         remaining_flat_indices = np.sort(remaining_flat_indices)
 
     rows, cols = np.unravel_index(remaining_flat_indices, (height, width))
-    coords = cell_lower_left(rows, cols, cell_size_m)  # (M, 2)
+    coords = _sample_point_in_cells(rows, cols, cell_size_m, rng)  # (M, 2)
     rss_dbm = rss_dbm_gt[rows, cols].reshape(-1, 1)  # (M, 1)
 
     return coords, rss_dbm
@@ -205,13 +244,13 @@ def sample_train_test_points(
     """(0, 0)-(area_size_m, area_size_m) から train / test 点をサンプリングする (pool 制約なし)
 
     注意: このバージョンは全有効セルを対象にするため、test_prod のリークを防ぐ
-    仕組みを持たない。チューニング・本番実験からは呼ばず、代わりに
-    sample_train_test_points_from_pool / sample_train_points_from_pool を使うこと。
+    仕組みを持たない. チューニング・本番実験からは呼ばず、代わりに
+    sample_train_test_points_from_pool / sample_train_points_from_pool を使うこと.
     """
     train_coords, train_rss_dbm, train_flat_indices = _sample_train_points(
         rss_dbm_gt, area_size_m, cell_size_m, train_size, rng
     )
-    test_coords, test_rss_dbm = _sample_test_cells(
+    test_coords, test_rss_dbm = _sample_test_points(
         rss_dbm_gt, cell_size_m, test_size, rng, excluded_flat_indices=train_flat_indices
     )
     return train_coords, train_rss_dbm, test_coords, test_rss_dbm
@@ -233,7 +272,7 @@ def sample_train_test_points_from_pool(
 ]:
     """pool_flat_indices の範囲内だけで train / test 点をサンプリングする
 
-    チューニング (train_tune / test_tune) がこれを通る。test_prod のセルには絶対に触れない。
+    チューニング (train_tune / test_tune) がこれを通る. test_prod のセルには絶対に触れない.
 
     Parameters
     ----------
@@ -243,7 +282,7 @@ def sample_train_test_points_from_pool(
     train_coords, train_rss_dbm, train_flat_indices = _sample_train_points(
         rss_dbm_gt, area_size_m, cell_size_m, train_size, rng, allowed_flat_indices=pool_flat_indices
     )
-    test_coords, test_rss_dbm = _sample_test_cells(
+    test_coords, test_rss_dbm = _sample_test_points(
         rss_dbm_gt,
         cell_size_m,
         test_size,
@@ -264,8 +303,8 @@ def sample_train_points_from_pool(
 ) -> tuple[Float[np.ndarray, "N 2"], Float[np.ndarray, "N 1"]]:
     """pool_flat_indices の範囲内だけで train 点のみをサンプリングする (test は作らない)
 
-    train_prod 用。test_prod (PoolTestSplit.test_flat_indices) はこの関数のスコープに
-    一切現れない。
+    train_prod 用. test_prod (PoolTestSplit.test_coords) はこの関数のスコープに
+    一切現れない.
 
     Parameters
     ----------
@@ -283,8 +322,9 @@ def sample_all_valid_cells(
 ) -> tuple[Float[np.ndarray, "V 2"], Float[np.ndarray, "V 1"]]:
     """欠測でない全セル (pool + test_prod の両方) を取得する (可視化専用)
 
-    train/test の区別を一切行わない。この関数の戻り値を評価 (RMSE計算) に
-    使ってはならない。あくまでマップ補間・可視化のための全点予測用。
+    train/test の区別を一切行わない. この関数の戻り値を評価 (RMSE計算) に
+    使ってはならない. あくまでマップ補間・可視化のための全点予測用.
+    セルの左下端座標を返す (可視化のグリッド整列を優先し、連続化はしない).
     """
     height, width = rss_dbm_gt.shape
     valid_flat_indices = np.flatnonzero(~np.isnan(rss_dbm_gt))

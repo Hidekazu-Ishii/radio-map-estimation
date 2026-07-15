@@ -14,49 +14,11 @@ def point_to_cell_index(
 
     セルは半開区間 [col * cell_size_m, (col+1) * cell_size_m) x
     [row * cell_size_m, (row+1) * cell_size_m) として定義される
-     (snap_to_nearest_grid_point の round ベースの最近傍スナップとは異なり、丸めは行わない)
-
-    points は x, y ともに 0 以上を前提とする
 
     Returns:
         座標が含まれるセルの (row, col) インデックス配列
     """
     indices = np.floor(points / cell_size_m).astype(np.int64)  # (N, 2)
-    row = indices[:, 1]
-    col = indices[:, 0]
-    return np.stack([row, col], axis=-1)
-
-
-def snap_to_nearest_grid_point(
-    points: Float[ndarray, "N 2"],
-    cell_size_m: float,
-) -> Float[ndarray, "N 2"]:
-    """座標を最も近いグリッド点座標 (セル左下端, cell_size_m x 整数) に変換する
-
-    グリッド点は x, y ともに 0 以上を前提とする
-
-    Returns:
-        グリッド点にスナップされた (x, y) 座標配列
-    """
-    return np.round(points / cell_size_m) * cell_size_m
-
-
-def grid_point_to_index(
-    grid_points: Float[ndarray, "N 2"],
-    cell_size_m: float,
-) -> Int[ndarray, "N 2"]:
-    """snap_to_nearest_grid_point で得たグリッド点座標を (row, col) インデックスに変換する
-
-    Parameters
-    ----------
-    grid_points : snap_to_nearest_grid_point の出力 (round 済み座標)
-    cell_size_m : セルサイズ [m]
-
-    Returns
-    -------
-    (row, col) インデックス配列shape (N, 2)
-    """
-    indices = np.round(grid_points / cell_size_m).astype(np.int64)  # (N, 2)
     row = indices[:, 1]
     col = indices[:, 0]
     return np.stack([row, col], axis=-1)
@@ -84,13 +46,18 @@ def coord_to_bldg_index(
     margin_m: float,
     grid_shape: tuple[int, int],
 ) -> Int[ndarray, "N 2"]:
-    """物理座標 (x, y) → 最近傍グリッド点座標にスナップ → margin オフセット付き bldg_mask インデックス (row, col)
+    """物理座標 (x, y) → 含まれるセルの (row, col) インデックスに変換する
+     (floor ベース、包含判定) → margin オフセット付き bldg_mask インデックス
+
+    RSS値の対応 (point_to_cell_index) と同じ floor ベースのセル包含判定を用いる
+    セルは半開区間 [x, x + cell_size_m) を代表座標 (左下端) に紐づける
+    最近傍グリッド点への丸めは行わない (round ベースのスナップは最大 ±0.5 セル分の
+    誤差を生むため廃止)
 
     範囲外は端にクリップする
     """
     offset = margin_num_cells(margin_m, cell_size_m)
-    grid_points = snap_to_nearest_grid_point(points, cell_size_m)  # (N,2)
-    idx = grid_point_to_index(grid_points, cell_size_m) + offset  # (N,2)
+    idx = point_to_cell_index(points, cell_size_m) + offset  # (N,2)
 
     h, w = grid_shape
     row = np.clip(idx[:, 0], 0, h - 1)

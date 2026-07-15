@@ -13,7 +13,7 @@ import pytest
 
 from radio_map_estimation.pathloss.base import FitResult
 from radio_map_estimation.shadowing.gp import GPShadowingModel
-from radio_map_estimation.shadowing.kernels.gudmundson import GudmundsonKernel
+from radio_map_estimation.shadowing.kernel.gudmundson import GudmundsonKernel
 
 # ------------------------------------------------------------------
 # fixtures (実験条件の明示)

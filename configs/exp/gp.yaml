@@ -2,7 +2,7 @@
 run_id: "001_baseline" # 連番 + 変更点説明
 
 # 学習点数
-train_size: [256, 512, 1024]
+train_size: [512, 1024]
 
 # 評価点数
 test_size: 1000
@@ -38,3 +38,12 @@ gp:
 gudmundson:
   sigma_2_init: 50.0 # シャドウイング分散の初期値 [dB²]
   d_cor_init: 50.0 # 相関距離の初期値 [m]
+
+# グラフ距離バリオグラム診断 (Stage 1: エッジ重み関数の妥当性検証)
+graph_distance:
+  method: neg_log # エッジ重み→距離の変換方式 "neg_log" | "reciprocal"
+  eps: 1.0e-9 # 数値安定化用の下限値 (0除算・log(0)防止)
+
+variogram:
+  n_bins: 20 # 距離ビンの分割数
+  max_distance: 4 # ビンの上限距離 (null なら最大グラフ距離を自動使用)

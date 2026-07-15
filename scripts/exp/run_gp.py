@@ -14,12 +14,22 @@ outputs/tuning_analysis/ffnn_los/best_{ffnn_tuning_run_id}.csv から
 (city_dir, mesh_code, freq_ghz) ごとに読み込む
  (チューニング結果を Single Source of Truth とし、config側との重複・ズレを避けるため)
 
+グラフ距離バリオグラム診断 (Stage 1: エッジ重み関数の妥当性検証):
+    Gudmundson カーネルを「エッジ重み関数のベースライン」とみなし、train のみで
+    フィットしたパラメータを train + test_prod 全ノードに適用してグラフを構築、
+    train_train / heldout_heldout の2群で経験的セミバリオグラムを重ねて比較する。
+    test_prod は元々「一度だけ確定した held-out」なので、この診断のために
+    新たなサンプリングは不要 (train_train = 学習に使った残差、
+    heldout_heldout = test_prod の真値残差 shadowing_gt_test を使うだけ)。
+
 出力ディレクトリ構造:
     outputs/scratch/{city_dir}/{mesh_code}/{freq_ghz}/{pathloss_model}_{shadowing_model}_{kernel}/
             train{train_size}_test{n_test_prod}/trial{trial_idx}/
-            ├── config.yaml        # 実験設定の完全な記録
-            ├── fit_results.json   # フィット結果 (パラメータ・RMSE)
-            └── predictions.npz    # 予測値・GT・座標・訓練データ
+            ├── config.yaml          # 実験設定の完全な記録
+            ├── fit_results.json     # フィット結果 (パラメータ・RMSE)
+            ├── pred.npz             # 予測値・GT・座標・訓練データ
+            ├── graph_variogram.npz  # グラフ距離バリオグラム診断結果 (bin_centers/gamma/counts)
+            └── graph_variogram.png  # train_train vs heldout_heldout の重ね描き
 
 Usage:
     uv run scripts/exp/run_gp.py configs/plateau.yaml configs/sionna.yaml configs/exp/gp.yaml
@@ -34,11 +44,23 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from numpy.random import default_rng
 from omegaconf import DictConfig, OmegaConf
 
+from radio_map_estimation.graph.distance import (
+    GraphDistanceConfig,
+    compute_graph_shortest_path,
+    weights_to_graph_distance,
+)
+from radio_map_estimation.graph.edge_weight.kernel_adapter import KernelEdgeWeight
+from radio_map_estimation.graph.variogram import (
+    VariogramConfig,
+    VariogramResult,
+    compute_grouped_variogram,
+)
 from radio_map_estimation.loader.dataset import PoolTestSplit
 from radio_map_estimation.loader.loader import load_full_map_data, load_production_data
 from radio_map_estimation.pathloss.base import FitResult, PathLossModel
@@ -47,7 +69,7 @@ from radio_map_estimation.pathloss.ffnn import FFNNModel
 from radio_map_estimation.pathloss.ffnn_los import FFNNLosModel
 from radio_map_estimation.pathloss.floating_intercept import FIModel
 from radio_map_estimation.shadowing.gp import GPShadowingModel
-from radio_map_estimation.shadowing.kernels.gudmundson import GudmundsonKernel
+from radio_map_estimation.shadowing.kernel.gudmundson import GudmundsonKernel
 from radio_map_estimation.utils.load_tunedparams import (
     FFNNLosHyperparams,
     get_tuned_params,
@@ -73,7 +95,7 @@ class ExperimentConfig:
     # 実験管理
     train_sizes: tuple[int, ...]
     # test_prod のサンプリングには使わない (split ファイルで固定済み)。
-    # 指定された場合は split.test_flat_indices の件数との整合性チェックにのみ使う。
+    # 指定された場合は split.test_coords の件数との整合性チェックにのみ使う。
     expected_test_size: int | None
     n_trials: int
     master_seed: int
@@ -94,6 +116,11 @@ class ExperimentConfig:
     # Gudmundson カーネルハイパーパラメータ
     gudmundson_sigma_2_init: float
     gudmundson_d_cor_init: float
+    # グラフ距離バリオグラム診断 (Stage 1) の設定
+    graph_distance_method: str  # "neg_log" | "reciprocal"
+    graph_distance_eps: float
+    variogram_n_bins: int
+    variogram_max_distance: float | None
 
 
 def load_experiment_config(path: Path) -> ExperimentConfig:
@@ -138,6 +165,12 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         gp_gtol=float(cfg.gp.gtol),
         gudmundson_sigma_2_init=float(cfg.gudmundson.sigma_2_init),
         gudmundson_d_cor_init=float(cfg.gudmundson.d_cor_init),
+        graph_distance_method=str(cfg.graph_distance.method),
+        graph_distance_eps=float(cfg.graph_distance.get("eps", 1e-9)),
+        variogram_n_bins=int(cfg.variogram.n_bins),
+        variogram_max_distance=(
+            float(cfg.variogram.max_distance) if cfg.variogram.get("max_distance") is not None else None
+        ),
     )
 
 
@@ -287,6 +320,82 @@ def save_fit_results(
         json.dump(results, f, indent=2)
 
 
+def compute_graph_variogram(
+    cfg: ExperimentConfig,
+    train_data,
+    test_data,
+    train_residuals: np.ndarray,
+    shadowing_gt_test: np.ndarray,
+    sh_fit: FitResult,
+) -> dict[str, VariogramResult]:
+    """グラフ距離バリオグラム診断 (Stage 1) を計算する
+
+    train_train 群には学習に使った train 残差を、heldout_heldout 群には
+    test_prod の真値残差 (学習には一切使っていない) を使う。test_prod は
+    元々「一度だけ確定した held-out」なので、この診断のために新たな
+    サンプリングは不要 (カンニングの心配もない)。
+
+    GudmundsonKernel.make_input / eval は内部状態に依存しない純粋関数のため、
+    train のみでフィットした sh_fit.params を明示的に渡すだけでよく、
+    GPShadowingModel の内部状態には一切触れない。
+    """
+    edge_weight_kernel = GudmundsonKernel(
+        sigma_2_init=cfg.gudmundson_sigma_2_init,
+        d_cor_init=cfg.gudmundson_d_cor_init,
+    )
+    edge_weight_fn = KernelEdgeWeight(
+        kernel=edge_weight_kernel,
+        fitted_log_params=np.log(np.array([sh_fit.params["sigma_2"], sh_fit.params["d_cor"]])),
+    )
+
+    all_coords = np.concatenate([train_data.coords, test_data.coords], axis=0)
+    all_residuals = np.concatenate([train_residuals, shadowing_gt_test], axis=0)
+    train_mask = np.concatenate(
+        [
+            np.ones(len(train_data.coords), dtype=bool),
+            np.zeros(len(test_data.coords), dtype=bool),
+        ]
+    )
+
+    weights = edge_weight_fn.compute_weights(all_coords)
+    edge_distance = weights_to_graph_distance(
+        weights,
+        GraphDistanceConfig(method=cfg.graph_distance_method, eps=cfg.graph_distance_eps),  # type: ignore[arg-type]
+    )
+    graph_distance = compute_graph_shortest_path(edge_distance)
+
+    return compute_grouped_variogram(
+        graph_distance,
+        all_residuals,
+        train_mask,
+        VariogramConfig(n_bins=cfg.variogram_n_bins, max_distance=cfg.variogram_max_distance),
+    )
+
+
+def save_graph_variogram(out_dir: Path, results: dict[str, VariogramResult]) -> None:
+    """グループ別の bin_centers / gamma / counts を1つの npz にまとめて保存する"""
+    payload: dict[str, np.ndarray] = {}
+    for group, res in results.items():
+        payload[f"{group}__bin_centers"] = res.bin_centers
+        payload[f"{group}__gamma"] = res.gamma
+        payload[f"{group}__counts"] = res.counts
+    np.savez(out_dir / "graph_variogram.npz", **payload)  # type: ignore
+
+
+def plot_graph_variogram(out_dir: Path, results: dict[str, VariogramResult]) -> None:
+    """train_train / heldout_heldout の重ね描きプロットを保存する"""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for group, res in results.items():
+        ax.plot(res.bin_centers, res.gamma, marker="o", label=group)
+    ax.set_xlabel("Graph distance")
+    ax.set_ylabel(r"$\gamma(d)$ (empirical semivariance)")
+    ax.set_title("Graph-distance variogram: train_train vs heldout_heldout")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_dir / "graph_variogram.png", dpi=150)
+    plt.close(fig)
+
+
 # ------------------------------------------------------------------
 # エントリポイント
 # ------------------------------------------------------------------
@@ -336,7 +445,7 @@ def main(
 
                 # test_prod を確定した split を読み込む (fail loudly: 未生成なら build_split.py を先に実行)
                 split = PoolTestSplit.load(split_path)
-                n_test_prod = len(split.test_flat_indices)
+                n_test_prod = len(split.test_coords)
 
                 if exp_cfg.expected_test_size is not None and exp_cfg.expected_test_size != n_test_prod:
                     raise ValueError(
@@ -419,6 +528,18 @@ def main(
                         shadowing_gain_db = pathloss_only_rmse_db - pathloss_shadowing_rmse_db
                         shadowing_gt_test = test_data.rss_dbm_gt - pathloss_pred
 
+                        # --- グラフ距離バリオグラム診断 (Stage 1) ---
+                        # train_train: 学習に使った train 残差
+                        # heldout_heldout: test_prod の真値残差 (学習には一切使っていない)
+                        graph_variogram_results = compute_graph_variogram(
+                            exp_cfg,
+                            train_data,
+                            test_data,
+                            residuals,
+                            shadowing_gt_test,
+                            sh_fit,
+                        )
+
                         # --- 保存 ---
                         out_dir = make_output_dir(
                             root,
@@ -457,6 +578,8 @@ def main(
                             shadowing_var=shadowing_var,
                             rss_pred=rss_pred,
                         )
+                        save_graph_variogram(out_dir, graph_variogram_results)
+                        plot_graph_variogram(out_dir, graph_variogram_results)
 
                         # --- 可視化専用: 全有効セルへの予測 (評価には使わない) ---
                         full_map_pathloss_pred = pl_model.predict_mean(

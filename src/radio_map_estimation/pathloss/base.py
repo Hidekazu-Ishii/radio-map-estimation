@@ -280,9 +280,8 @@ class PathLossModel(ABC):
         bbox の四隅、および bbox 内グリッド点の物理座標復元は、いずれも
         grid_info.coord_to_bldg_index / grid_info.bldg_index_to_coord に委譲する
          (margin オフセットの実体は grid_transform.py に一元化済み) .
-        bbox の四隅は最近傍グリッド点へのスナップ (round) でインデックス化されるため、
-        楕円境界ぎりぎりの建物ピクセルが走査範囲から漏れる可能性がある
-         (最大で ±0.5 セル分の近似誤差) .
+        bbox の四隅は floor ベースのセル包含判定 (RSS の point_to_cell_index と同じ)
+        でインデックス化される.
 
         画素の代表点は build_bldg_mask と同じ「セルの左下端点」を用いる
          (セル中心ではない) .

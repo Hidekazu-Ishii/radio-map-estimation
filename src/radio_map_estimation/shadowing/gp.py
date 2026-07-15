@@ -33,7 +33,7 @@ from scipy.optimize import minimize
 from radio_map_estimation.pathloss.base import FitResult
 
 from .base import ShadowingModel
-from .kernels.base import Kernel
+from .kernel.base import Kernel
 
 # 数値安定化用 jitter (対角加算)
 _JITTER = 1e-6

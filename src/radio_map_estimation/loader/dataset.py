@@ -98,10 +98,12 @@ class GridInfo:
         self,
         points: Float[ndarray, "N 2"],
     ) -> Int[ndarray, "N 2"]:
-        """物理座標 (x, y) → 最近傍グリッド点にスナップ → bldg_mask の (row, col) インデックス
+        """物理座標 (x, y) → 含まれるセルの (row, col) インデックスに変換する (floor ベース)
+         → bldg_mask の (row, col) インデックス
 
         margin オフセット・範囲外クリップの実体は grid_transform.coord_to_bldg_index に
-        一元化されている (build_bldg_mask と同じインデックス体系)
+        一元化されている (build_bldg_mask および RSS の point_to_cell_index と同じ
+        floor ベースのセル包含判定)
         """
         return coord_to_bldg_index(points, self.bldg_cell_size_m, self.margin_m, self.bldg_mask.shape)
 
@@ -123,19 +125,22 @@ class PoolTestSplit:
     """test_prod (本番評価用、固定) と pool (チューニング + 本番学習用) の分割
 
     一度 create() で確定したら save() でファイルに永続化し、以後は load() で
-    読み込むだけにする (乱数で毎回作り直さない)。
+    読み込むだけにする (乱数で毎回作り直さない).
 
-    test_flat_indices はチューニング処理のどの関数にも渡してはならない。
-    渡してよいのは pool_flat_indices のみ。
+    test_prod は確定時点で連続座標として固定する (セルインデックスではなく点そのもの).
+    test_coords / test_rss_dbm はチューニング処理のどの関数にも渡してはならない.
+    渡してよいのは pool_flat_indices のみ.
 
     Attributes
     ----------
-    test_flat_indices : test_prod に属する有効セルのフラットインデックス (固定・不変)
-    pool_flat_indices  : それ以外の有効セル (チューニング + 本番学習で使用可能)
-    grid_shape         : (H, W) rss_dbm_gt の形状。読み込み時の整合性チェック用
+    test_coords       : test_prod の連続座標 (固定・不変)
+    test_rss_dbm      : test_coords に対応する真値 (固定・不変)
+    pool_flat_indices : それ以外の有効セル (チューニング + 本番学習で使用可能)
+    grid_shape        : (H, W) rss_dbm_gt の形状. 読み込み時の整合性チェック用
     """
 
-    test_flat_indices: Int[ndarray, "T 1"]
+    test_coords: Float[ndarray, "T 2"]
+    test_rss_dbm: Float[ndarray, "T 1"]
     pool_flat_indices: Int[ndarray, "P 1"]
     grid_shape: tuple[int, int]
 
@@ -143,20 +148,25 @@ class PoolTestSplit:
     def create(
         cls,
         rss_dbm_gt: Float[ndarray, "H W"],
+        cell_size_m: float,
         test_size: int,
         rng: np.random.Generator,
     ) -> PoolTestSplit:
-        """全有効セルから test_prod を一度だけ確定する (新規生成)
+        """全有効セルから test_prod (連続座標) を一度だけ確定する (新規生成)
 
         Parameters
         ----------
-        rss_dbm_gt : (H, W) 真値マップ (欠測は nan)
-        test_size  : test_prod のセル数
-        rng        : 乱数生成器 (外部から受け取る、この呼び出しの中でのみ使う)
+        rss_dbm_gt  : (H, W) 真値マップ (欠測は nan)
+        cell_size_m : セルサイズ [m] (test_prod 点をセル内に配置するために使う)
+        test_size   : test_prod の点数
+        rng         : 乱数生成器 (外部から受け取る、この呼び出しの中でのみ使う)
         """
-        test_flat_indices, pool_flat_indices = create_pool_test_split(rss_dbm_gt, test_size, rng)
+        test_coords, test_rss_dbm, pool_flat_indices = create_pool_test_split(
+            rss_dbm_gt, cell_size_m, test_size, rng
+        )
         return cls(
-            test_flat_indices=test_flat_indices,
+            test_coords=test_coords,
+            test_rss_dbm=test_rss_dbm,
             pool_flat_indices=pool_flat_indices,
             grid_shape=rss_dbm_gt.shape,
         )
@@ -165,7 +175,8 @@ class PoolTestSplit:
         """分割結果を npz に保存する (再現性確保のため一度だけ実行する想定)"""
         np.savez(
             path,
-            test_flat_indices=self.test_flat_indices,
+            test_coords=self.test_coords,
+            test_rss_dbm=self.test_rss_dbm,
             pool_flat_indices=self.pool_flat_indices,
             grid_shape=np.array(self.grid_shape),
         )
@@ -186,7 +197,8 @@ class PoolTestSplit:
             )
         data = np.load(path)
         return cls(
-            test_flat_indices=data["test_flat_indices"],
+            test_coords=data["test_coords"],
+            test_rss_dbm=data["test_rss_dbm"],
             pool_flat_indices=data["pool_flat_indices"],
             grid_shape=tuple(int(x) for x in data["grid_shape"]),  # type: ignore
         )

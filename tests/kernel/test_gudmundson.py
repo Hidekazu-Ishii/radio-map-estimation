@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from radio_map_estimation.shadowing.kernels.gudmundson import GudmundsonKernel
+from radio_map_estimation.shadowing.kernel.gudmundson import GudmundsonKernel
 
 # ------------------------------------------------------------------
 # fixtures (実験条件の明示)

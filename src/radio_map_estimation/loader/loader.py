@@ -20,7 +20,6 @@ from jaxtyping import Float
 
 from .dataset import GridInfo, PoolTestSplit, TestData, TrainData
 from .sampler import (
-    cell_lower_left,
     sample_all_valid_cells,
     sample_train_points_from_pool,
     sample_train_test_points_from_pool,
@@ -178,7 +177,7 @@ def load_production_data(
     """本番実験用データを作る
 
     train_prod : pool からサンプリング
-    test_prod  : split.test_flat_indices の全件をそのまま使う (再サンプリングしない、1回だけ評価する前提)
+    test_prod  : split.test_coords / split.test_rss_dbm をそのまま使う (再サンプリングしない、1回だけ評価する前提)
     """
     arrays = load_grid_info_and_maps(bldgmap_data, radiomap_data)
 
@@ -197,13 +196,8 @@ def load_production_data(
         split.pool_flat_indices,
     )
 
-    height, width = arrays.rss_dbm_gt.shape
-    rows, cols = np.unravel_index(split.test_flat_indices, (height, width))
-    test_coords = cell_lower_left(rows, cols, arrays.cell_size_m)
-    test_rss_dbm = arrays.rss_dbm_gt[rows, cols].reshape(-1, 1)
-
     train = _build_train_data(train_coords, train_rss_dbm, arrays)
-    test = _build_test_data(test_coords, test_rss_dbm, arrays)
+    test = _build_test_data(split.test_coords, split.test_rss_dbm, arrays)
     return train, test, arrays.grid_info
 
 

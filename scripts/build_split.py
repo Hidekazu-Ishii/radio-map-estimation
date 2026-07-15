@@ -91,8 +91,9 @@ def main(
 
                 radiomap_data = np.load(radiomap_path)
                 rss_dbm_gt: np.ndarray = radiomap_data["rss_dbm_gt"]
+                cell_size_m: float = float(radiomap_data["cell_size_m"])
 
-                split = PoolTestSplit.create(rss_dbm_gt, split_cfg.test_size, rng)
+                split = PoolTestSplit.create(rss_dbm_gt, cell_size_m, split_cfg.test_size, rng)
                 split.save(split_path)
 
                 logger.info(
@@ -100,7 +101,7 @@ def main(
                     area.city_dir,
                     mesh_code,
                     freq_ghz,
-                    len(split.test_flat_indices),
+                    len(split.test_coords),
                     len(split.pool_flat_indices),
                     split_path.relative_to(root),
                 )
