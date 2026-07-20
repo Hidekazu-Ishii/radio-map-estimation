@@ -101,24 +101,6 @@ def test_compute_azimuth_cardinal_directions(dx: float, dy: float, expected_rad:
 
 
 # ------------------------------------------------------------------
-# _bresenham_line
-# ------------------------------------------------------------------
-
-
-def test_bresenham_line_includes_both_endpoints() -> None:
-    rows, cols = PathLossModel._bresenham_line(0, 0, 3, 3)
-    assert (rows[0], cols[0]) == (0, 0)
-    assert (rows[-1], cols[-1]) == (3, 3)
-
-
-def test_bresenham_line_same_point() -> None:
-    # 始点=終点でも1点だけ返ること
-    rows, cols = PathLossModel._bresenham_line(2, 2, 2, 2)
-    assert rows.shape == (1,)
-    assert cols.shape == (1,)
-
-
-# ------------------------------------------------------------------
 # compute_ray_crossing_count
 # ------------------------------------------------------------------
 

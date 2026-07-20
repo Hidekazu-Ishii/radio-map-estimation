@@ -2,7 +2,7 @@
 """
 学習・予測用データセットおよび静的情報を構築する
 
-読み込み済みデータを受け取り、TrainData / TestData / GridInfo を返す。
+読み込み済みデータを受け取り、TrainData / TestData / GridInfo を返す.
 
 責務の分離:
     load_grid_info_and_maps : npz 読み込みと GridInfo 構築のみ (共通処理)
@@ -132,10 +132,10 @@ def load_tuning_dataset(
 
     Parameters
     ----------
-    split      : PoolTestSplit。split.pool_flat_indices のみが使われ、
+    split      : PoolTestSplit. split.pool_flat_indices のみが使われ、
                  split.test_flat_indices はこの関数のスコープに一切現れない
     train_size : train_tune の点数
-    test_size  : test_tune の点数 (None 不可。pool を使い切らないよう明示指定する)
+    test_size  : test_tune の点数 (None 不可. pool を使い切らないよう明示指定する)
     rng        : 乱数生成器 (外部から受け取る)
 
     Raises
@@ -208,12 +208,12 @@ def load_full_map_data(
     """可視化専用: 全有効セル (pool + test_prod の両方) への予測用データを作る
 
     train_prod に選ばれなかった点には、test_prod でない点 (どちらの集合にも
-    属さない残りのプール点) も含まれる。これらは学習に使われておらず、かつ
-    正式な評価対象でもないため、モデルの真の汎化性能を代表する点ではない。
+    属さない残りのプール点) も含まれる. これらは学習に使われておらず、かつ
+    正式な評価対象でもないため、モデルの真の汎化性能を代表する点ではない.
 
     したがって、この関数の戻り値 (TestData.rss_dbm_gt を含む) を
-    RMSE 等の性能評価に使ってはならない。あくまで見た目のなめらかな
-    マップを作るための補間・可視化専用。
+    RMSE 等の性能評価に使ってはならない. あくまで見た目のなめらかな
+    マップを作るための補間・可視化専用.
     """
     arrays = load_grid_info_and_maps(bldgmap_data, radiomap_data)
     coords, rss_dbm = sample_all_valid_cells(arrays.rss_dbm_gt, arrays.cell_size_m)

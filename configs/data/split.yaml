@@ -1,0 +1,2 @@
+test_size: 1000       # test_prod のセル数 (固定・以後変更しない)
+master_seed: 12345    # split 確定専用のシード. 他のシード系統と混ぜない

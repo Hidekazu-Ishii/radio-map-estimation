@@ -33,15 +33,15 @@ from numpy import ndarray
 class Kernel(ABC):
     """GP カーネルの抽象基底クラス
 
-    GP エンジンはこのインターフェースのみを通じてカーネルを扱う。
+    GP エンジンはこのインターフェースのみを通じてカーネルを扱う.
     入力の種類 (距離行列・差分ベクトル・特徴量など) は
-    サブクラスの make_input() に隠蔽される。
+    サブクラスの make_input() に隠蔽される.
 
     make_input の **kwargs 設計
     ---------------------------
-    追加情報 (TX 座標など) を必要とするカーネルは kwargs 経由で受け取る。
+    追加情報 (TX 座標など) を必要とするカーネルは kwargs 経由で受け取る.
     不要なカーネルは kwargs を無視するだけでよく、呼び出し側は
-    常に同じシグネチャで make_input() を呼べる。
+    常に同じシグネチャで make_input() を呼べる.
 
         # TX 座標不要 (GudmundsonKernel など)
         kernel.make_input(coords_a, coords_b)
@@ -80,7 +80,7 @@ class Kernel(ABC):
     ) -> Float[ndarray, "M N"]:
         """内部状態を変更せずにカーネル行列を計算する
 
-        最適化ループ内で呼ばれるため、self の状態を書き換えてはならない。
+        最適化ループ内で呼ばれるため、self の状態を書き換えてはならない.
 
         Parameters
         ----------
@@ -102,7 +102,7 @@ class Kernel(ABC):
         """内部状態を変更せずに ∂K/∂log(θ) を計算する
 
         規約: log スケール勾配を返す (∂K/∂log(θ) = ∂K/∂θ · θ)
-        GP エンジン側では chain rule の θ 乗算を行わない。
+        GP エンジン側では chain rule の θ 乗算を行わない.
 
         Parameters
         ----------
@@ -119,7 +119,7 @@ class Kernel(ABC):
     def set_log_params(self, log_params: Float[ndarray, "P 1"]) -> None:
         """fit 完了後に内部状態を更新する
 
-        最適化ループ内では呼ばず、fit() の最後に一度だけ呼ぶこと。
+        最適化ループ内では呼ばず、fit() の最後に一度だけ呼ぶこと.
         """
         ...
 
@@ -151,7 +151,7 @@ class Kernel(ABC):
     def __call__(self, kernel_input: np.ndarray) -> Float[ndarray, "M N"]:
         """現在の内部状態 (fit 後のパラメータ) でカーネル行列を計算する
 
-        fit() → set_log_params() 完了後に _posterior() から呼ばれる。
-        各サブクラスが自身の log_params を使って eval() を呼ぶ。
+        fit() → set_log_params() 完了後に _posterior() から呼ばれる.
+        各サブクラスが自身の log_params を使って eval() を呼ぶ.
         """
         ...

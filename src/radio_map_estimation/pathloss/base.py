@@ -9,11 +9,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
-from jaxtyping import Bool, Float, Int
+from jaxtyping import Bool, Float
 from numpy import ndarray
 from numpy.random import Generator
 
 from ..loader.dataset import GridInfo
+from ..utils.bresenham import bresenham_line
 
 _SPEED_OF_LIGHT_M_S: float = 299_792_458.0  # 光速 [m/s]
 
@@ -224,48 +225,13 @@ class PathLossModel(ABC):
 
         crossing_count = np.zeros((n, 1), dtype=np.float64)
         for i in range(n):
-            rows, cols = PathLossModel._bresenham_line(rx_idx[i, 0], rx_idx[i, 1], tx_idx[i, 0], tx_idx[i, 1])
+            rows, cols = bresenham_line(rx_idx[i, 0], rx_idx[i, 1], tx_idx[i, 0], tx_idx[i, 1])
             hits = grid_info.bldg_mask[rows, cols]  # (line_len,) bool
 
             prev = np.concatenate([[False], hits[:-1]])
             crossing_count[i, 0] = np.count_nonzero(hits & ~prev)
 
         return crossing_count  # (N,1)
-
-    @staticmethod
-    def _bresenham_line(
-        r0: int, c0: int, r1: int, c1: int
-    ) -> tuple[Int[ndarray, "L 1"], Int[ndarray, "L 1"]]:
-        """Bresenham ラインアルゴリズムで (r0,c0)-(r1,c1) 間の格子点を列挙する
-
-        Returns
-        -------
-        rows, cols : ライン上の行・列インデックス (両端含む、重複なし)
-        """
-        rows: list[int] = []
-        cols: list[int] = []
-
-        dr = abs(r1 - r0)
-        dc = abs(c1 - c0)
-        sr = 1 if r0 < r1 else -1
-        sc = 1 if c0 < c1 else -1
-        err = dr - dc
-
-        r, c = r0, c0
-        while True:
-            rows.append(r)
-            cols.append(c)
-            if r == r1 and c == c1:
-                break
-            e2 = 2 * err
-            if e2 > -dc:
-                err -= dc
-                r += sr
-            if e2 < dr:
-                err += dr
-                c += sc
-
-        return np.array(rows, dtype=np.int64), np.array(cols, dtype=np.int64)
 
     @staticmethod
     def compute_bldg_count_in_fresnel_ellipse(

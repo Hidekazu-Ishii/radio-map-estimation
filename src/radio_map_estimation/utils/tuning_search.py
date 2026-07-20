@@ -69,9 +69,9 @@ class SearchSpace:
 class TuningConfig:
     """チューニング1回分の設定
 
-    train_size / test_size は pool (test_prod を除いた領域) 内でのサンプリングに使う。
+    train_size / test_size は pool (test_prod を除いた領域) 内でのサンプリングに使う.
     test_size は None 不可: pool 全体を1回の test_tune で使い切ってしまうと、
-    Monte Carlo 繰り返しのたびに train_tune との独立性が失われるため、明示指定を必須にする。
+    Monte Carlo 繰り返しのたびに train_tune との独立性が失われるため、明示指定を必須にする.
     """
 
     run_id: str

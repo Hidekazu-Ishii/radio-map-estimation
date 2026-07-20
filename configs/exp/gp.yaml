@@ -26,9 +26,9 @@ ffnn_tuning_run_id: "tune_v1"
 
 # GP ハイパーパラメータ（定常カーネル共通）
 gp:
-  sigma_n_2_init: 2.0 # 観測ノイズ分散の初期値 [dB²]
+  sigma_n_2_init: 4.0 # 観測ノイズ分散の初期値 [dB²]
   sigma_n_2_min: 1.0 # 観測ノイズ分散の下限 [dB²]
-  sigma_n_2_max: 4.0 # 観測ノイズ分散の上限 [dB²]
+  sigma_n_2_max: 9.0 # 観測ノイズ分散の上限 [dB²]
   n_restarts: 10 # マルチスタート試行数
   max_iter: 500 # L-BFGS-B 最大イテレーション数
   ftol: 1.0e-9 # L-BFGS-B 関数値収束閾値
@@ -38,12 +38,3 @@ gp:
 gudmundson:
   sigma_2_init: 50.0 # シャドウイング分散の初期値 [dB²]
   d_cor_init: 50.0 # 相関距離の初期値 [m]
-
-# グラフ距離バリオグラム診断 (Stage 1: エッジ重み関数の妥当性検証)
-graph_distance:
-  method: neg_log # エッジ重み→距離の変換方式 "neg_log" | "reciprocal"
-  eps: 1.0e-9 # 数値安定化用の下限値 (0除算・log(0)防止)
-
-variogram:
-  n_bins: 20 # 距離ビンの分割数
-  max_distance: 4 # ビンの上限距離 (null なら最大グラフ距離を自動使用)

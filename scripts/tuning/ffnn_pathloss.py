@@ -10,8 +10,8 @@ n_trials 回 (乱数シード違い) fit -> predict_mean -> RMSE計算 を繰り
  (電波伝搬特性がエリア・周波数に強く依存するため)
 
 train_tune / test_tune のサンプリングは、事前に scripts/build_split.py で確定した
-PoolTestSplit.pool_flat_indices の範囲内のみに制限される。test_flat_indices (test_prod)
-はこのスクリプトのどの変数にも一切現れない。
+PoolTestSplit.pool_flat_indices の範囲内のみに制限される. test_flat_indices (test_prod)
+はこのスクリプトのどの変数にも一切現れない.
 
 出力ディレクトリ構造:
     outputs/tuning/{city_dir}/{mesh_code}/{freq_ghz}/{search_dir_name}/{run_id}/
@@ -21,8 +21,8 @@ PoolTestSplit.pool_flat_indices の範囲内のみに制限される。test_flat
             summary.json          # 全trialの集約統計 (mean/std)
 
 Usage:
-    uv run scripts/tuning/ffnn_pathloss.py ffnn configs/plateau.yaml configs/sionna.yaml configs/tuning/ffnn_model_search.yaml
-    uv run scripts/tuning/ffnn_pathloss.py ffnn_los configs/plateau.yaml configs/sionna.yaml configs/tuning/ffnn_model_search.yaml
+    uv run scripts/tuning/ffnn_pathloss.py ffnn configs/data/plateau.yaml configs/data/sionna.yaml configs/tuning/ffnn_model_search.yaml
+    uv run scripts/tuning/ffnn_pathloss.py ffnn_los configs/data/plateau.yaml configs/data/sionna.yaml configs/tuning/ffnn_model_search.yaml
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from radio_map_estimation.loader.dataset import PoolTestSplit
 from radio_map_estimation.loader.loader import load_tuning_dataset
 from radio_map_estimation.pathloss.ffnn import FFNNModel
 from radio_map_estimation.pathloss.ffnn_los import FFNNLosModel
-from radio_map_estimation.utils.naming import freq_dir_name
+from radio_map_estimation.utils.dir_naming import freq_dir_name
 from radio_map_estimation.utils.tuning_search import (
     load_tuning_config,
     make_param_dir,
@@ -119,9 +119,9 @@ def main(
                 )
                 radiomap_data = np.load(radiomap_path)
 
-                # test_prod を確定した split を読み込む。ここで得られる split から
-                # 以後 pool_flat_indices しか参照しない (test_flat_indices はスコープに出さない)。
-                # 存在しない場合は fail loudly: scripts/build_split.py を先に実行すること。
+                # test_prod を確定した split を読み込む. ここで得られる split から
+                # 以後 pool_flat_indices しか参照しない (test_flat_indices はスコープに出さない).
+                # 存在しない場合は fail loudly: scripts/build_split.py を先に実行すること.
                 split = PoolTestSplit.load(split_path)
 
                 for params in param_combinations:

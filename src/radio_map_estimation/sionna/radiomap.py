@@ -14,7 +14,7 @@ Sionna RT シーンのロード・送信機配置・RadioMapSolver 実行
 - I/O なし (保存は visualize.py へ)
 - dataclass は持たない (SionnaConfig はエントリポイント simulate.py に定義)
 - Sionna RT のインポートは関数内で行う (Mitsuba variant の自動設定のため)
-- シーンロードは1回のみ。周波数ごとに scene.frequency を差し替えて再計算する
+- シーンロードは1回のみ. 周波数ごとに scene.frequency を差し替えて再計算する
    (load_scene はコストが高いため、TX 配置等はロード直後に1回だけ行う)
 """
 
@@ -35,8 +35,8 @@ def _load_scene(
     cfg,
 ):
     """
-    シーンを1回ロードし、アンテナ・TX を配置して返す。
-    周波数は呼び出し元でループしながら scene.frequency に設定する。
+    シーンを1回ロードし、アンテナ・TX を配置して返す.
+    周波数は呼び出し元でループしながら scene.frequency に設定する.
 
     Parameters
     ----------
@@ -113,13 +113,13 @@ def build_radio_maps(
     area_size_m: float,
 ) -> list[tuple[float, object, object, object, np.ndarray]]:
     """
-    Sionna RT シーンをロードし、各周波数の MeshRadioMap と PlanarRadioMap を計算する。
+    Sionna RT シーンをロードし、各周波数の MeshRadioMap と PlanarRadioMap を計算する.
 
     シーンロードと TX 配置は1回のみ行い、cfg.frequency_hz のリストをループして
-    scene.frequency を更新しながらシミュレーションを実行する。
-    複数シードの RSS [W] 平均によりフェージングを低減する (cfg.num_seeds 回実行) 。
+    scene.frequency を更新しながらシミュレーションを実行する.
+    複数シードの RSS [W] 平均によりフェージングを低減する (cfg.num_seeds 回実行) .
     RadioMap オブジェクト (可視化用) と平均済み ndarray (学習データ用) の
-    両方を返す。
+    両方を返す.
 
     Parameters
     ----------
@@ -131,7 +131,7 @@ def build_radio_maps(
     Returns
     -------
     list of (freq_hz, scene, mesh_radio_map, planar_radio_map, planar_avg_dbm)
-        周波数ごとの結果リスト。scene は全周波数で共通 (frequency が更新済み)
+        周波数ごとの結果リスト. scene は全周波数で共通 (frequency が更新済み)
     """
     from .incoherent_patch import apply_incoherent_patch
 

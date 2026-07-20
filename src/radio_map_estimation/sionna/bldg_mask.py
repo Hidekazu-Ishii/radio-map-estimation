@@ -45,7 +45,7 @@ def build_bldg_mask(
     True (建物上) と判定する
 
     マージン (build_area_spec.py と同一定義: margin = area_size_m / 5) の分だけ
-    有効エリア [0, area_size_m] の外側にもマスクを拡張する。
+    有効エリア [0, area_size_m] の外側にもマスクを拡張する.
 
     Parameters
     ----------
@@ -60,8 +60,8 @@ def build_bldg_mask(
     np.ndarray
         shape: (num_cells_total, num_cells_total), dtype=bool
         num_cells_total = num_cells_core + 2 * num_margin_cells
-        インデックス k (0-based) は実座標 x = (k - num_margin_cells) * cell_size に対応する。
-        margin_m=0.0 の場合は従来通り k がそのまま x = k * cell_size に対応する。
+        インデックス k (0-based) は実座標 x = (k - num_margin_cells) * cell_size に対応する.
+        margin_m=0.0 の場合は従来通り k がそのまま x = k * cell_size に対応する.
     """
     if not bldg_footprint_ply_path.exists():
         raise FileNotFoundError(f"bldg_footprint.ply not found: {bldg_footprint_ply_path}")

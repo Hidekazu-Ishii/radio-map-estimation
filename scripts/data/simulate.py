@@ -2,7 +2,7 @@
 PLATEAU シーン構築 + Sionna RT シミュレーションの統合エントリポイント
 
 使い方:
-    uv run scripts/data/simulate.py configs/plateau.yaml configs/sionna.yaml
+    uv run scripts/data/simulate.py configs/data/plateau.yaml configs/data/sionna.yaml
 
 処理の流れ:
     configs/scene.yaml + configs/sionna.yaml
@@ -42,7 +42,7 @@ from radio_map_estimation.sionna.bldg_mask import build_bldg_mask
 from radio_map_estimation.sionna.radiomap import build_radio_maps
 from radio_map_estimation.sionna.save_radiomap import save_radio_maps
 from radio_map_estimation.sionna.tx_placement import build_tx_positions
-from radio_map_estimation.utils.naming import freq_dir_name
+from radio_map_estimation.utils.dir_naming import freq_dir_name
 from radio_map_estimation.utils.visualize import save_rss_png
 
 # from radio_map_estimation.scene.scene_preview import save_scene_preview
@@ -320,13 +320,6 @@ def main(plateau_config_path: Path, sionna_config_path: Path) -> None:
                 values_db=None,
                 bldg_mask=bldg_mask,
             )
-
-            # 3D プレビュー HTML
-            # save_scene_preview(
-            # scene_dir=output_dir,
-            # html_path=output_dir / "scene.html",
-            # title=f"PLATEAU 3D Scene: {mesh_code}",
-            # )
 
             # 8. Sionna RT シミュレーション (全周波数)
             # シーンロード・TX 配置は build_radio_maps 内で1回のみ実行される

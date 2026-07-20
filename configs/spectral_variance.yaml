@@ -1,0 +1,27 @@
+# scripts/exp/analyze_spectral_variance.py 用設定
+
+train_size: [512, 1024]
+n_trials: 2
+
+pathloss_model: ffnn
+shadowing_model: graph
+edge_weight: gudmundson  # graph の場合、edge_weight がエッジ重み関数の意味
+
+# pred.npz の読み込み元 (run_gp.py が実際に実行したときの実験を特定する)
+source:
+  shadowing_model: gp
+  kernel: gudmundson
+
+# LOS幾何接続判定
+los:
+  max_radius_m: 50.0
+
+# Gudmundson型エッジ重み関数のヒューリスティック初期値 (最適化はせず、この値を固定パラメータとして使う)
+gudmundson:
+  sigma_2_init: 50.0
+  d_cor_init: 20.0
+
+# スペクトルビニング
+spectral:
+  n_bins: 20
+  max_lambda: null  # null なら最大固有値を使う

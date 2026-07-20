@@ -1,11 +1,11 @@
 """
 PoolTestSplit (test_prod 固定領域 + チューニング用 pool) を確定するエントリポイント
 
-一度だけ実行し、生成された split.npz は以後変更しない。
-チューニング・本番実験のどちらも、この split.npz を読み込んで使う。
+一度だけ実行し、生成された split.npz は以後変更しない.
+チューニング・本番実験のどちらも、この split.npz を読み込んで使う.
 
 使い方:
-    uv run scripts/build_split.py configs/plateau.yaml configs/sionna.yaml configs/split.yaml
+    uv run scripts/data/build_split.py configs/data/plateau.yaml configs/data/sionna.yaml configs/data/split.yaml
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 from radio_map_estimation.loader.dataset import PoolTestSplit
-from radio_map_estimation.utils.naming import freq_dir_name
+from radio_map_estimation.utils.dir_naming import freq_dir_name
 
 logging.basicConfig(
     level=logging.INFO,

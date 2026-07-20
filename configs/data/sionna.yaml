@@ -2,7 +2,7 @@
 
 # 送信機設定
 # TX 位置は bldg.ply から自動設定（UMa 想定）
-# 候補エリア: [area_size_m/5, area_size_m*4/5] x [area_size_m/5, area_size_m*4/5]
+# 候補エリア: 中心から半径 center_search_radius_m の円
 num_tx: 1
 center_search_radius_m: 200 # 中心探索半径 [m]
 min_separation_m: 500.0  # TX 間の局間距離 [m]（3GPP TR 38.901 UMa ISD 参考）

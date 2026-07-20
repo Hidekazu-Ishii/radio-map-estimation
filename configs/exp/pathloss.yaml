@@ -1,8 +1,8 @@
 # 実験設定
-run_id: "001_ffnn_los_v1" # 連番 + 変更点説明
+run_id: "001_baseline" # 連番 + 変更点説明
 
 # 学習点数
-train_size: [256, 512, 1024]
+train_size: [512, 1024]
 
 # 評価点数
 test_size: 1000

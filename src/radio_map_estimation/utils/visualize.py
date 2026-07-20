@@ -35,7 +35,7 @@ def scatter_to_grid(
 
     Returns
     -------
-    grid : (H, W) ndarray。未観測セルは nan
+    grid : (H, W) ndarray. 未観測セルは nan
     """
     n = int(area_size_m / cell_size_m)
     grid = np.full((n, n), np.nan)
@@ -92,7 +92,7 @@ def save_rss_png(
     # 建物セルを灰色でオーバーレイ
     if bldg_mask is not None:
         bldg_rgba = np.zeros((*bldg_mask.shape, 4), dtype=float)
-        bldg_rgba[bldg_mask] = [0.5, 0.5, 0.5, 1.0]  # gray, alpha=1.0
+        bldg_rgba[bldg_mask] = [0.7, 0.7, 0.7, 1.0]  # gray, alpha=1.0
         ax.imshow(
             bldg_rgba,
             origin="lower",

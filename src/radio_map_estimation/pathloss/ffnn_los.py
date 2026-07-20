@@ -2,8 +2,8 @@
 """
 FFNN-LOS (Feedforward Neural Network + LOS遮蔽特徴) パスロスモデル
 
-FFNNModel (ffnn.py) の入力特徴量を1つ増やしたモデル。
-都市マップは1つのみを想定し、単一の bldg_mask に対して特徴を計算する。
+FFNNModel (ffnn.py) の入力特徴量を1つ増やしたモデル.
+都市マップは1つのみを想定し、単一の bldg_mask に対して特徴を計算する.
 
 入力特徴量 (4次元) :
     log10(d)              : 3D距離の対数 [m] → min-max正規化 → [0, 1]
@@ -14,9 +14,9 @@ FFNNModel (ffnn.py) の入力特徴量を1つ増やしたモデル。
 
 bldg_count_in_rhombus の算出方法 (PathLossModel.compute_bldg_count_in_rhombus) :
     RX-TXを結ぶ線分を長い対角線とし、その中点を通り線分に直交する
-    短い対角線 (長さは長い対角線の半分) を持つひし形を定義する。
-    この範囲内で建物マスクが True のピクセル数を数える (面積に比例する量) 。
-    log10(d) と同様に訓練データの min-max で正規化する。
+    短い対角線 (長さは長い対角線の半分) を持つひし形を定義する.
+    この範囲内で建物マスクが True のピクセル数を数える (面積に比例する量) .
+    log10(d) と同様に訓練データの min-max で正規化する.
 
 出力:
     pathloss [dB] → min-max正規化 → [0, 1] (訓練時)
